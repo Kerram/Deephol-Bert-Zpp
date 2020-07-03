@@ -465,7 +465,7 @@ def _pad_up_to(value, size, axis, name=None):
 
 
 def update_features_using_deephol(features, max_seq_length):
-    tensor_tokenizer = tokenization.TensorWorkSplitter(vocab_file=FLAGS.vocab_file)
+    tensor_tokenizer = tokenization.TensorWordSplitter(vocab_file=FLAGS.vocab_file)
 
     with tf.variable_scope('extractor'):
         tf.logging.info("********** Tokenization of goal in Holist ********")
