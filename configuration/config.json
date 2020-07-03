@@ -1,0 +1,59 @@
+{
+    "general": {
+        "vocab_file": "vocab.txt",
+        "bert_config_file": "bert_config.json",
+        "tpu_zone": "us-central1-f",
+        "gcp_project": "zpp-mim-1920",
+        "num_tpu_cores": 8,
+        "tpu_name": null,
+        "max_seq_length": 512
+    },
+
+    "pretraining": {
+        "data-generation": {
+            "input_data_dir": "../data/raw/",
+            "output_data_dir": null,
+            "max_predictions_per_seq": 80,
+            "random_seed": 12345,
+            "dupe_factor": 2,
+            "masked_lm_prob": 0.15
+        },
+
+        "model_dir": null,
+
+        "train_batch_size": 32,
+        "eval_batch_size": 8,
+
+        "learning_rate": 5e-5,
+
+        "num_train_steps": 500000,
+        "warmup_proportion": 0.1,
+
+        "max_eval_steps": 100000,
+
+        "save_checkpoint_steps": 10000,
+        "iterations_per_loop": 1000
+    },
+    
+    "fine-tuning": {        
+        "data-generation": {
+            "input_data_dir": "../data/augmented/",
+            "output_data_dir": null
+        },
+
+
+        "model_dir": null, 
+        "export_dir": null,
+
+        "warmup_proportion": 0.1,
+        "num_train_epochs": 3.0,
+
+        "train_batch_size": 32,
+        "eval_batch_size": 8,
+
+        "learning_rate": 1e-6,
+
+        "save_checkpoint_steps": 10000,
+        "iterations_per_loop": 1000 
+    }
+}

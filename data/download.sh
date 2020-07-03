@@ -1,3 +1,6 @@
+mkdir augmented
+mkdir raw
+
 gsutil cp gs://zpp-bucket-1920/data-extraction-csv/test.csv augmented/
 gsutil cp gs://zpp-bucket-1920/data-extraction-csv/train.csv augmented/
 gsutil cp gs://zpp-bucket-1920/data-extraction-csv/valid.csv augmented/
