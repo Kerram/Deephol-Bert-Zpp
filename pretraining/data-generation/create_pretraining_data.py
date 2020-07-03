@@ -23,6 +23,8 @@ from tree_parser import is_parsable, split_into_subtrees
 
 import collections
 import random
+import json
+import os
 import tokenization
 import tensorflow as tf
 
@@ -30,28 +32,8 @@ flags = tf.flags
 
 FLAGS = flags.FLAGS
 
-flags.DEFINE_string("input_file", None,
-                    "Input raw text file (or comma-separated list of files).")
-
-flags.DEFINE_string(
-    "output_file", None,
-    "Output TF example file (or comma-separated list of files).")
-
-flags.DEFINE_string("vocab_file", None,
-                    "The vocabulary file that the BERT model was trained on.")
-
-flags.DEFINE_integer("max_seq_length", 512, "Maximum sequence length.")
-
-flags.DEFINE_integer("max_predictions_per_seq", 80,
-                     "Maximum number of masked LM predictions per sequence.")
-
-flags.DEFINE_integer("random_seed", 12345, "Random seed for data generation.")
-
-flags.DEFINE_integer(
-    "dupe_factor", 2,
-    "Number of times to duplicate the input data (with different masks).")
-
-flags.DEFINE_float("masked_lm_prob", 0.15, "Masked LM probability.")
+flags.DEFINE_string("configuration_dir", None,
+                    "Path to the configuration directory.")
 
 
 class TrainingInstance(object):
@@ -330,13 +312,33 @@ def create_masked_lm_predictions(tokens, masked_lm_prob,
 
   return (output_tokens, masked_lm_positions, masked_lm_labels)
 
+
+def add_conf_dir_to_paths(configuration, config_dir):
+  configuration['general']['vocab_file'] = os.path.join(config_dir, configuration['general']['vocab_file'])
+  configuration['pretraining']['data-generation']['input_data_dir'] =\
+    os.path.join(config_dir, configuration['pretraining']['data-generation']['input_data_dir'])
+
+
 def main(_):
+  with open(FLAGS.configuration_dir) as f:
+    configuration = json.load(f)
+    add_conf_dir_to_paths(configuration, FLAGS.configuration_dir)
+
+  vocab_file = configuration['general']['vocab_file']
+  input_data_dir = configuration['pretraining']['data-generation']['input_data_dir']
+  random_seed = configuration['pretraining']['data-generation']['random_seed']
+  max_seq_length = configuration['general']['max_seq_length']
+  dupe_factor = configuration['pretraining']['data-generation']['dupe_factor']
+  max_predictions_per_seq = configuration['pretraining']['data-generation']['max_predictions_per_seq']
+  masked_lm_prob = configuration['pretraining']['data-generation']['masked_lm_prob']
+  output_data_dir = configuration['pretraining']['data-generation']['output_data_dir']
+
   tf.logging.set_verbosity(tf.logging.INFO)
 
-  tokenizer = tokenization.LongestTokenizer(vocab=FLAGS.vocab_file)
+  tokenizer = tokenization.LongestTokenizer(vocab=vocab_file)
 
   input_files = []
-  for input_pattern in FLAGS.input_file.split(","):
+  for input_pattern in os.path.join(input_data_dir, "train.json"):
     if input_pattern:
       input_files.extend(tf.gfile.Glob(input_pattern))
 
@@ -344,25 +346,22 @@ def main(_):
   for input_file in input_files:
     tf.logging.info("  %s", input_file)
 
-  rng = random.Random(FLAGS.random_seed)
+  rng = random.Random(random_seed)
   instances = create_training_instances(
-      input_files, tokenizer, FLAGS.max_seq_length, FLAGS.dupe_factor, 
-      FLAGS.masked_lm_prob, FLAGS.max_predictions_per_seq, rng)
+      input_files, tokenizer, max_seq_length, dupe_factor,
+      masked_lm_prob, max_predictions_per_seq, rng)
 
-  output_files = FLAGS.output_file.split(",")
-  output_files = [file for file in output_files if file]
+  output_files = [os.path.join(output_data_dir, "train.tfrecord")]
 
   tf.logging.info("*** Writing to output files ***")
   for output_file in output_files:
     tf.logging.info("  %s", output_file)
 
-  write_instance_to_example_files(instances, tokenizer, FLAGS.max_seq_length,
-                                  FLAGS.max_predictions_per_seq, output_files)
+  write_instance_to_example_files(instances, tokenizer, max_seq_length,
+                                  max_predictions_per_seq, output_files)
 
 
 if __name__ == "__main__":
-  flags.mark_flag_as_required("input_file")
-  flags.mark_flag_as_required("output_file")
-  flags.mark_flag_as_required("vocab_file")
+  flags.mark_flag_as_required("configuration_dir")
   tf.app.run()
 
