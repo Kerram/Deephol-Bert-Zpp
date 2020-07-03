@@ -1,0 +1,91 @@
+// File based on proof_assistant.proto from deepmath repository.
+
+syntax = "proto2";
+
+package theorem_database;
+
+message Definition {
+  // A definition of a constant.
+  // The field definition_type is one of BASIC/PAIR/DRULE/DEFINE/RECURSIVE/
+  // INDUCTIVE/SPEC.
+  optional string definition_type = 1;
+  // All but SPEC definitions define a term
+  optional string definition_term = 2;
+  // The constants introduced by this definition
+  repeated string constants = 3;
+  // Fingerprint of a theorem; only for RECURSIVE definitions and specifications
+  optional int64 theorem_arg = 4;
+}
+
+message TypeDefinition {
+  // A definition of a type. Directly corresponds to function
+  // new_type_definition in HOL Light.
+  optional string type_name = 1;
+  optional string abs_name = 2;
+  optional string rep_name = 3;
+  optional int64 theorem_arg = 4;
+}
+
+message Theorem {
+  enum Tag {
+    GOAL = 0;
+    THEOREM = 1;
+    DEFINITION = 2;
+    TYPE_DEFINITION = 3;
+  }
+  enum Split {
+    // Default value in case the split information is not relevant.
+    UNKNOWN = 0;
+    // The theorem was trained on.
+    TRAINING = 1;
+    // The theorem was used in monitoring the training process.
+    VALIDATION = 2;
+    // The theorem was not used during the training process in any way.
+    TESTING = 3;
+  }
+  optional string name = 4;
+
+  // Hypotheses must be strings that represent theorems.
+  // Currently only goals (tag = GOAL) are allowed to have hypotheses.
+  repeated string hypotheses = 1;
+
+  // Conclusion is a string representing a term.
+  optional string conclusion = 2;
+
+  optional Tag tag = 3;
+  optional Split training_split = 5;
+  optional int64 fingerprint = 6;
+
+  // Contains information needed to introduce a constant. Only used when
+  // tag = DEFINITION.
+  optional Definition definition = 7;
+
+  // Contains information needed to introduce a type. Only used when
+  // tag = TYPE_DEFINITION.
+  optional TypeDefinition type_definition = 8;
+
+  // Indicates the libraries the theorem is part of (currently, each tag is
+  // one of "core", "complex", or "flyspeck")
+  repeated string library_tag = 9;
+
+  // HOL-light specific. Human-readable version by HOL Light's pretty printer.
+  // Currently NOT guaranteed to be parseable by HOL Light.
+  optional string pretty_printed = 10;
+
+  // HOL-light specific. Indicates the type of proof function that originally
+  // generated this theorem: TAC_PROOF, prove_by_refinement, or specification.
+  optional string proof_function = 11;
+
+  // Fingerprint of the goal that resulted in this theorem. Used for exporting
+  // proofs.
+  optional int64 goal_fingerprint = 12;
+}
+
+// Note: Ordering of theorems is important. Theorems later only use those that
+// appear earlier when they were proved.
+message TheoremDatabase {
+  repeated Theorem theorems = 1;
+  // Unique reference to this library. Used in PremiseSets to reference this
+  // database.
+  optional string name = 2;
+}
