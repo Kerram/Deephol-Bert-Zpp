@@ -1,5 +1,5 @@
 # Code used to convert tsv files to tf_record files used by run_deephol.py fine tuning.
-# Code is a modified part of older run_deephol.py, which is and was a mix of
+# Code is a modified part of older run_deephol.py, which was a mix of
 # bert's classifier.py and deephol's architectures.py.
 
 from __future__ import absolute_import
@@ -104,28 +104,8 @@ class InputFeatures(object):
         self.thm_str = thm_str
 
 
-class DataProcessor(object):
-    """Base class for data converters for sequence classification data sets."""
-
-    def get_train_examples(self, data_dir):
-        """Gets a collection of `InputExample`s for the train set."""
-        raise NotImplementedError()
-
-    def get_dev_examples(self, data_dir):
-        """Gets a collection of `InputExample`s for the dev set."""
-        raise NotImplementedError()
-
-    def get_test_examples(self, data_dir):
-        """Gets a collection of `InputExample`s for prediction."""
-        raise NotImplementedError()
-
-    def get_tac_labels(self):
-        """Gets the list tac_ids"""
-        raise NotImplementedError()
-
-    def get_is_negative_labels(self):
-        """Gets the list of is_negative labels"""
-        raise NotImplementedError()
+class DeepholProcessor:
+    """Processor for Deephol dataset"""
 
     @classmethod
     def _read_tsv(cls, input_file, quotechar=None):
@@ -136,10 +116,6 @@ class DataProcessor(object):
             for line in reader:
                 lines.append(line)
             return lines
-
-
-class DeepholProcessor(DataProcessor):
-    """Processor for Deephol dataset"""
 
     def get_examples(self, data_path, set_type):
         """See base class."""
@@ -227,12 +203,12 @@ def convert_single_example(
             "goal_input_ids: %s" % " ".join([str(x) for x in goal_input_ids])
         )
         tf.logging.info("thm_input_ids: %s" % " ".join([str(x) for x in thm_input_ids]))
-        tf.logging.info("tac_id (example): %s" % (example.tac_id))
+        tf.logging.info("tac_id (example): %s" % (example.tac_id,))
         tf.logging.info("goal_input_mask: %s" % " ".join([str(x) for x in goal_input_mask]))
         tf.logging.info("thm_input_mask: %s" % " ".join([str(x) for x in thm_input_mask]))
-        tf.logging.info("tac_id: %d" % (tac_id))
-        tf.logging.info("is_negative: %d" % (is_negative))
-        tf.logging.info("is_negative (example): %s" % (example.is_negative))
+        tf.logging.info("tac_id: %d" % (tac_id,))
+        tf.logging.info("is_negative: %d" % (is_negative,))
+        tf.logging.info("is_negative (example): %s" % (example.is_negative,))
 
     feature = InputFeatures(
         goal_input_ids=goal_input_ids,

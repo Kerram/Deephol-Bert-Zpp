@@ -31,13 +31,6 @@ flags.DEFINE_string(
 )
 
 flags.DEFINE_string(
-    "data_dir",
-    None,
-    "The input data dir. Should contain the .tsv files (or other data files) "
-    "for the task.",
-)
-
-flags.DEFINE_string(
     "vocab_file", None, "The vocabulary file."
 )
 
@@ -52,7 +45,7 @@ flags.DEFINE_integer(
     512,
     "The maximum total input sequence length after tokenization. "
     "Sequences longer than this will be truncated, and sequences shorter "
-    "than this will be padded (not in exported model).",
+    "than this will be padded.",
 )
 
 flags.DEFINE_bool("do_train", True, "Whether to run training.")
@@ -369,21 +362,6 @@ def pairwise_scorer(net, is_negative_labels, is_real_example):
     return ce_loss, par_logits
 
 
-def _concat_net_tac_id(net, tac_ids, num_tac_labels):
-  """Concatenate net with one-hot vectors of tac_id."""
-  tf.add_to_collection('label_tac_id', tac_ids)
-
-  # shape: [batch_size, num_tactics]
-  label_tac_one_hot = tf.one_hot(tac_ids, num_tac_labels)
-  tf.add_to_collection('label_tac_one_hot', label_tac_one_hot)
-
-  # shape: [batch_size, hidden_size + num_tactics]
-  net = tf.concat([net, tf.to_float(label_tac_one_hot)], axis=1)
-  tf.add_to_collection('pfstate_and_tac', net)
-
-  return net
-
-
 def create_model(
     bert_config,
     goal_input_ids,
@@ -421,10 +399,6 @@ def create_model(
                 goal_net, thm_net,
                 tf.multiply(goal_net, thm_net)
             ], -1)
-
-            # PARAMS_COND_ON_TAC
-            # Concatenate one-hot encoding of tac_ids.
-            net = _concat_net_tac_id(net, tac_ids, num_tac_labels)
 
             if is_training:
                 net = tf.nn.dropout(net, rate=(1 - 0.7))
@@ -576,7 +550,7 @@ def model_fn_builder(
         if "is_real_example" in features:
             is_real_example = tf.cast(features["is_real_example"], dtype=tf.float32)
         else:
-            is_real_example = tf.ones(tf.shape(label_ids), dtype=tf.float32)
+            is_real_example = tf.ones(tf.shape(tac_ids), dtype=tf.float32)
 
         is_training = mode == tf.estimator.ModeKeys.TRAIN
 
@@ -660,7 +634,7 @@ def model_fn_builder(
                     Remover(["encoder/dilated_cnn_pairwise_encoder/goal/"]),
                 )
 
-        # Ten komunikat się nie będzie do końca zgadzał
+        # These logs could not contain all variables!
         tf.logging.info("**** Trainable Variables ****")
         for var in tvars:
             init_string = ""
@@ -674,7 +648,6 @@ def model_fn_builder(
 
         if mode == tf.estimator.ModeKeys.TRAIN:
             loss = tf.losses.get_total_loss()
-            tf.logging.info("REG losses: %d" % (len(tf.losses.get_regularization_losses()),))
 
             train_op = optimization.create_optimizer(
                 loss, learning_rate, num_train_steps, num_warmup_steps, use_tpu
@@ -697,8 +670,9 @@ def model_fn_builder(
             ):
                 tac_predictions = tf.argmax(tac_logits, axis=-1, output_type=tf.int32)
 
+                REWRITE_ID = 5.0
                 chosen_tac = tf.metrics.mean(tac_predictions)
-                chosen_tac_acc = tf.metrics.accuracy(labels=tac_predictions, predictions=tf.ones(tf.shape(tac_predictions))*5.0)
+                rewrite_acc = tf.metrics.accuracy(labels=tac_predictions, predictions=tf.ones(tf.shape(tac_predictions))*REWRITE_ID)
 
                 is_negative = tf.to_float(is_negative)
 
@@ -721,7 +695,7 @@ def model_fn_builder(
                     values=pos_guess, weights=is_real_example * (1 - is_negative)
                 )
                 neg_acc = tf.metrics.mean(
-                    values=neg_guess, weights=is_real_example * (is_negative)
+                    values=neg_guess, weights=is_real_example * is_negative
                 )
 
                 tot_loss = (0.5 * par_loss) + tac_loss
@@ -739,7 +713,7 @@ def model_fn_builder(
                     "par_loss": par_loss,
                     "total_loss": tot_loss,
                     "chosen_tactic (mean)": chosen_tac,
-                    "chosen_tactic (acc)": chosen_tac_acc,
+                    "rewrite accuracy": rewrite_acc,
                 }
 
                 return res
@@ -884,7 +858,7 @@ def main(_):
         config=run_config,
         train_batch_size=FLAGS.train_batch_size,
         eval_batch_size=FLAGS.eval_batch_size,
-        predict_batch_size=1,  # Does not matter.
+        predict_batch_size=8,  # Does not matter.
     )
 
     if FLAGS.do_train:
@@ -988,7 +962,6 @@ def main(_):
 
 
 if __name__ == "__main__":
-    flags.mark_flag_as_required("data_dir")
     flags.mark_flag_as_required("vocab_file")
     flags.mark_flag_as_required("output_dir")
     flags.mark_flag_as_required("bert_config_file")

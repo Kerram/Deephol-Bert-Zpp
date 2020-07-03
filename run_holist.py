@@ -2,7 +2,6 @@
 
 import argparse
 import os
-import random
 from multiprocessing import Pool
 
 import tensorflow as tf
