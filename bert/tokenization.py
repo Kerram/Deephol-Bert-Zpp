@@ -65,7 +65,7 @@ def load_vocab(vocab_file):
       else:
         print("ALARM!!!!")  # Legacy
 
-  return vocab, unk_index, sep_index
+  return vocab
 
 
 class WordSplitterTokenizer(object):

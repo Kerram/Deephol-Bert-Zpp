@@ -18,6 +18,10 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import sys
+
+sys.path.append("../../bert")
+
 from tensorflow.keras.utils import Progbar
 from tree_parser import is_parsable, split_into_subtrees
 
@@ -320,7 +324,7 @@ def add_conf_dir_to_paths(configuration, config_dir):
 
 
 def main(_):
-  with open(FLAGS.configuration_dir) as f:
+  with open(os.path.join(FLAGS.configuration_dir, "config.json")) as f:
     configuration = json.load(f)
     add_conf_dir_to_paths(configuration, FLAGS.configuration_dir)
 
@@ -335,12 +339,9 @@ def main(_):
 
   tf.logging.set_verbosity(tf.logging.INFO)
 
-  tokenizer = tokenization.LongestTokenizer(vocab=vocab_file)
+  tokenizer = tokenization.WordSplitterTokenizer(vocab=vocab_file)
 
-  input_files = []
-  for input_pattern in os.path.join(input_data_dir, "train.json"):
-    if input_pattern:
-      input_files.extend(tf.gfile.Glob(input_pattern))
+  input_files = [os.path.join(input_data_dir, "train.json")]
 
   tf.logging.info("*** Reading from input files ***")
   for input_file in input_files:
