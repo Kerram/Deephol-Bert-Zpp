@@ -29,10 +29,27 @@ def convert_to_unicode(text):
   else:
     raise ValueError("Not running on Python2 or Python 3?")
 
+def get_token_index(vocab_file, target_token): 
+  target_index = -1
+  with tf.gfile.GFile(vocab_file, "r") as reader:
+    i = 0
+    while True:
+      token = convert_to_unicode(reader.readline())
+      if not token:
+        break
+      if token.strip() == target_token:
+        target_index = i
+      i += 1     
+
+  assert target_index != -1
+  return target_index
+ 
 
 def load_vocab(vocab_file):
   """Loads a vocabulary file into a dictionary."""
-  vocab = collections.defaultdict(lambda: 9)  # 9 = [UNK]
+
+  unk_index = get_token_index(vocab_file, '[UNK]')
+  vocab = collections.defaultdict(lambda: unk_index)
   index = 0
 
   with tf.gfile.GFile(vocab_file, "r") as reader:
@@ -48,7 +65,7 @@ def load_vocab(vocab_file):
       else:
         print("ALARM!!!!")  # Legacy
 
-  return vocab
+  return vocab, unk_index, sep_index
 
 
 class WordSplitterTokenizer(object):
@@ -85,19 +102,21 @@ class TensorWordSplitter(object):
 
   def __init__(self, vocab_file):
     # Create vocab lookup tables from existing vocab id lists.
+
+    self.unk_index = get_token_index(vocab_file, '[UNK]')
+    self.sep_index = get_token_index(vocab_file, '[SEP]')
+    # Asserts that [CLS] exists
+    get_token_index(vocab_file, '[CLS]') 
+
     with tf.variable_scope('extractor'):
       self.vocab_table = self._vocab_table_from_file(vocab_file)
 
-  def _vocab_table_from_file(self, filename, reverse=False):
+  def _vocab_table_from_file(self, filename):
     with tf.gfile.Open(filename, 'r') as f:
       keys = [s.strip() for s in f.readlines()]
       values = tf.range(len(keys), dtype=tf.int64)
-      if not reverse:
-        init = tf.contrib.lookup.KeyValueTensorInitializer(keys, values)
-        return tf.contrib.lookup.HashTable(init, 9)  # 9 = [UNK]
-      else:
-        init = tf.contrib.lookup.KeyValueTensorInitializer(values, keys)
-        return tf.contrib.lookup.HashTable(init, '')
+      init = tf.contrib.lookup.KeyValueTensorInitializer(keys, values)
+      return tf.contrib.lookup.HashTable(init, self.unk_index)
 
   def tokenize(self, tm, max_seq_length):
     """Tokenizes tensor string according to lookup table."""
@@ -119,7 +138,6 @@ class TensorWordSplitter(object):
     ids = tf.SparseTensor(words.indices, id_values, words.dense_shape)
     ids = tf.sparse_tensor_to_dense(ids)
 
-    # 11 is an id for [SEP]
     def add_sep(tensor):
       original_shape = tf.shape(tensor)
 
@@ -127,7 +145,7 @@ class TensorWordSplitter(object):
       mask = tf.not_equal(tensor, tf.zeros(tf.shape(tensor), dtype=tf.int32))
       tensor = tf.boolean_mask(tensor, mask)
 
-      tensor = tf.concat([tensor, [11]], axis=0)
+      tensor = tf.concat([tensor, [self.sep_index]], axis=0)
       tensor = tf.pad(tensor, [[0, original_shape[0] - tf.shape(tensor)[0]]])
 
       return tensor
