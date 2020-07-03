@@ -1,0 +1,11 @@
+tensorflow==1.13.2
+pandas
+google-api-core
+google-api-python-client
+google-auth
+google-auth-httplib2
+google-compute-engine
+googleapis-common-protos
+oauth2client
+oauthlib
+protobuf
