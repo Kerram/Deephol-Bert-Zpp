@@ -649,6 +649,8 @@ def model_fn_builder(
         if mode == tf.estimator.ModeKeys.TRAIN:
             loss = tf.losses.get_total_loss()
 
+            tf.logging.info("Learning rate: %g" % (learning_rate,))
+
             train_op = optimization.create_optimizer(
                 loss, learning_rate, num_train_steps, num_warmup_steps, use_tpu
             )
