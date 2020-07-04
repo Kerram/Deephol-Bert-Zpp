@@ -85,11 +85,13 @@ class WordSplitterTokenizer(object):
     words.append('[SEP]')
 
     ids = list(map(lambda word: self.vocab[word], words))
+    mask = [1] * len(ids)
 
     while len(ids) < max_seq_length:
         ids.append(0)
+        mask.append(0)
 
-    return ids
+    return ids, mask
 
 
 class TensorWordSplitter(object):

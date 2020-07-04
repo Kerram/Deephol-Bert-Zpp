@@ -10,6 +10,10 @@ import collections
 import csv
 import tensorflow as tf
 import sys
+import json
+import os
+
+sys.path.append("../../bert")
 
 import tokenization
 
@@ -17,21 +21,7 @@ flags = tf.flags
 
 FLAGS = flags.FLAGS
 
-flags.DEFINE_string(
-    "data_path",
-    None,
-    "Path to input file. It should be in tsv format.",
-)
-
-flags.DEFINE_string(
-    "vocab_file", None, "The vocabulary file that the BERT model was trained on."
-)
-
-flags.DEFINE_string(
-    "output_path",
-    None,
-    "Path where we will save tf_record file.",
-)
+flags.DEFINE_string("configuration_dir", None, "Path to the configuration directory.")
 
 flags.DEFINE_string(
     "set_type",
@@ -39,16 +29,12 @@ flags.DEFINE_string(
     "Flag specifying whether we are to convert train, valid or test set.",
 )
 
-flags.DEFINE_integer(
-    "max_seq_length",
-    512,
-    "The maximum total input sequence length after tokenization. "
-    "Sequences longer than this will be truncated, and sequences shorter "
-    "than this will be padded.",
+flags.DEFINE_string(
+    "file_name",
+    None,
+    "Input file should be in the {input_data_dir }and be called {file_name}.csv."
+    "Output file will be created in the {output_data_dir} and will be called {file_name}.tf_record.",
 )
-
-flags.DEFINE_integer("eval_batch_size", 8, "Total batch size for eval."
-                                           "Important, because we need to pad with fake samples to match it.")
 
 
 class InputExample(object):
@@ -119,9 +105,7 @@ class DeepholProcessor:
 
     def get_examples(self, data_path, set_type):
         """See base class."""
-        return self._create_examples(
-            self._read_tsv(data_path), set_type
-        )
+        return self._create_examples(self._read_tsv(data_path), set_type)
 
     def get_tac_labels(self):
         return [str(i) for i in range(41)]
@@ -204,8 +188,12 @@ def convert_single_example(
         )
         tf.logging.info("thm_input_ids: %s" % " ".join([str(x) for x in thm_input_ids]))
         tf.logging.info("tac_id (example): %s" % (example.tac_id,))
-        tf.logging.info("goal_input_mask: %s" % " ".join([str(x) for x in goal_input_mask]))
-        tf.logging.info("thm_input_mask: %s" % " ".join([str(x) for x in thm_input_mask]))
+        tf.logging.info(
+            "goal_input_mask: %s" % " ".join([str(x) for x in goal_input_mask])
+        )
+        tf.logging.info(
+            "thm_input_mask: %s" % " ".join([str(x) for x in thm_input_mask])
+        )
         tf.logging.info("tac_id: %d" % (tac_id,))
         tf.logging.info("is_negative: %d" % (is_negative,))
         tf.logging.info("is_negative (example): %s" % (example.is_negative,))
@@ -294,10 +282,16 @@ def test_set_convert_examples_to_features(
         features["tac_ids"] = create_int_feature([feature.tac_id])
         features["is_negative"] = create_int_feature([feature.is_negative])
         features["is_real_example"] = create_int_feature([int(feature.is_real_example)])
-        features["goal_str"] = tf.train.Feature(bytes_list=tf.train.BytesList(
-            value=[bytes(feature.goal_str, encoding="utf-8")]))
-        features['thm_str'] = tf.train.Feature(bytes_list=tf.train.BytesList(
-            value=[bytes(feature.thm_str, encoding="utf-8")]))
+        features["goal_str"] = tf.train.Feature(
+            bytes_list=tf.train.BytesList(
+                value=[bytes(feature.goal_str, encoding="utf-8")]
+            )
+        )
+        features["thm_str"] = tf.train.Feature(
+            bytes_list=tf.train.BytesList(
+                value=[bytes(feature.thm_str, encoding="utf-8")]
+            )
+        )
         features["goal_input_mask"] = create_int_feature(feature.goal_input_mask)
         features["thm_input_mask"] = create_int_feature(feature.thm_input_mask)
 
@@ -306,50 +300,70 @@ def test_set_convert_examples_to_features(
     writer.close()
 
 
+def add_conf_dir_to_paths(configuration, config_dir):
+    configuration["general"]["vocab_file"] = os.path.join(
+        config_dir, configuration["general"]["vocab_file"]
+    )
+    configuration["fine-tuning"]["data-generation"]["input_data_dir"] = os.path.join(
+        config_dir, configuration["fine-tuning"]["data-generation"]["input_data_dir"]
+    )
+
+
 def main(_):
     csv.field_size_limit(sys.maxsize)
     tf.logging.set_verbosity(tf.logging.INFO)
 
-    processor = DeepholProcessor()
-    tokenizer = tokenization.WordSplitterTokenizer(vocab=FLAGS.vocab_file)
+    with open(os.path.join(FLAGS.configuration_dir, "config.json")) as f:
+        configuration = json.load(f)
+        add_conf_dir_to_paths(configuration, FLAGS.configuration_dir)
 
-    examples = processor.get_examples(FLAGS.data_path, FLAGS.set_type)
+    vocab_file = configuration["general"]["vocab_file"]
+    max_seq_length = configuration["general"]["max_seq_length"]
+    eval_batch_size = configuration["fine-tuning"]["eval_batch_size"]
+    input_data_dir = configuration["fine-tuning"]["data-generation"]["input_data_dir"]
+    output_data_dir = configuration["fine-tuning"]["data-generation"]["output_data_dir"]
+
+    processor = DeepholProcessor()
+    tokenizer = tokenization.WordSplitterTokenizer(vocab=vocab_file)
+
+    examples = processor.get_examples(
+        os.path.join(input_data_dir, FLAGS.file_name + ".tsv"), FLAGS.set_type
+    )
 
     tac_labels = processor.get_tac_labels()
     is_negative_labels = processor.get_is_negative_labels()
 
-    if FLAGS.set_type == 'eval':
+    if FLAGS.set_type == "valid":
         # TPU requires a fixed batch size for all batches, therefore the number
         # of examples must be a multiple of the batch size, or else examples
         # will get dropped. So we pad with fake examples which are ignored
         # later on. These do NOT count towards the metric (all tf.metrics
         # support a per-instance weight, and these get a weight of 0.0).
-        while len(examples) % FLAGS.eval_batch_size != 0:
+        while len(examples) % eval_batch_size != 0:
             examples.append(PaddingInputExample())
 
-    if FLAGS.set_type == 'test':
+    if FLAGS.set_type == "test":
         test_set_convert_examples_to_features(
             examples,
             tac_labels,
             is_negative_labels,
-            FLAGS.max_seq_length,
+            max_seq_length,
             tokenizer,
-            FLAGS.output_path,
+            os.path.join(output_data_dir, FLAGS.file_name + ".tf_record"),
         )
     else:
         file_based_convert_examples_to_features(
             examples,
             tac_labels,
             is_negative_labels,
-            FLAGS.max_seq_length,
+            max_seq_length,
             tokenizer,
-            FLAGS.output_path,
+            os.path.join(output_data_dir, FLAGS.file_name + ".tf_record"),
         )
 
 
 if __name__ == "__main__":
-    flags.mark_flag_as_required("data_path")
-    flags.mark_flag_as_required("output_path")
+    flags.mark_flag_as_required("configuration_dir")
     flags.mark_flag_as_required("set_type")
-    flags.mark_flag_as_required("vocab_file")
+    flags.mark_flag_as_required("file_name")
     tf.app.run()
