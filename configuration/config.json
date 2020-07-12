@@ -18,7 +18,7 @@
             "masked_lm_prob": 0.15
         },
 
-        "model_dir": "gs://zpp-bucket-1920/bert-bucket-golkarolka/bert_model11",
+        "model_dir": "gs://zpp-bucket-1920/bert-bucket-golkarolka/bert_model",
 
         "train_batch_size": 32,
         "eval_batch_size": 8,
@@ -39,22 +39,22 @@
     "fine-tuning": {        
         "data-generation": {
             "input_data_dir": "../data/augmented/",
-            "output_data_dir": "gs://zpp-bucket-1920/tpu-fine-tune/data/last_tests/test1"
+            "output_data_dir": "gs://zpp-bucket-1920/tpu-fine-tune/data/new_perf/bert"
         },
 
-        "model_dir": "gs://zpp-bucket-1920/tpu-fine-tune/models/last_tests/test1",
-        "export_dir": "gs://zpp-bucket-1920/tpu-fine-tune/exported/last_tests/test1",
+        "model_dir": "gs://zpp-bucket-1920/tpu-fine-tune/models/new_perf/perf_bert",
+        "export_dir": "gs://zpp-bucket-1920/tpu-fine-tune/exported/new_perf/perf_bert",
 
         "warmup_proportion": 0.1,
-        "num_train_epochs": 3.0,
+        "num_train_epochs": 1.0,
 
-        "train_batch_size": 32,
+        "train_batch_size": 8,
         "eval_batch_size": 8,
 
-        "learning_rate": 1e-6,
+        "learning_rate": 1e-7,
 
-        "save_checkpoint_steps": 10000,
-        "iterations_per_loop": 1000,
+        "save_checkpoint_steps": 1000000000,
+        "iterations_per_loop": 100,
 
         "tune_tpu_name": "test-tune",
         "debug_tpu_name": "test-debug"

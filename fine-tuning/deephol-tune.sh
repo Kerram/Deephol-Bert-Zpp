@@ -1,1 +1,1 @@
-python3 run_deephol.py --configuration_dir=../configuration --use_tpu=True --do_train=True --do_eval=True --do_export=False --infinite_eval=False
+python3 run_deephol.py --configuration_dir=../configuration --use_tpu=True --do_train=True --do_eval=False --do_export=False --infinite_eval=False

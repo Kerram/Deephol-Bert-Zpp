@@ -211,13 +211,13 @@ def tactic_classifier(
     if is_training:
         goal_net = tf.nn.dropout(goal_net, rate=(1 - 0.7))
     goal_net = tf.layers.dense(
-        goal_net, hidden_size, activation=tf.nn.relu, name="tac_dense1"
+        goal_net, 128, activation=tf.nn.relu, name="tac_dense1"
     )
 
     if is_training:
         goal_net = tf.nn.dropout(goal_net, rate=(1 - 0.7))
     goal_net = tf.layers.dense(
-        goal_net, hidden_size, activation=tf.nn.relu, name="tac_dense2"
+        goal_net, 128, activation=tf.nn.relu, name="tac_dense2"
     )
 
     if is_training:
@@ -298,13 +298,13 @@ def create_model(
 
             if is_training:
                 net = tf.nn.dropout(net, rate=(1 - 0.7))
-            net = tf.layers.dense(net, hidden_size, activation=tf.nn.relu)
+            net = tf.layers.dense(net, 128, activation=tf.nn.relu)
             if is_training:
                 net = tf.nn.dropout(net, rate=(1 - 0.7))
-            net = tf.layers.dense(net, hidden_size, activation=tf.nn.relu)
+            net = tf.layers.dense(net, 128, activation=tf.nn.relu)
             if is_training:
                 net = tf.nn.dropout(net, rate=(1 - 0.7))
-            net = tf.layers.dense(net, hidden_size, activation=tf.nn.relu)
+            net = tf.layers.dense(net, 128, activation=tf.nn.relu)
             tf.add_to_collection("thm_goal_fc", net)
 
     with tf.variable_scope("classifier"):
