@@ -40,7 +40,7 @@ flags.DEFINE_string(
 class InputExample(object):
     """A single training/test example for simple sequence classification."""
 
-    def __init__(self, guid, goal, thm, tac_id=None, is_negative=None):
+    def __init__(self, guid, goal, thm, weight, tac_id=None, is_negative=None):
         """Constructs an InputExample.
 
     Args:
@@ -55,6 +55,7 @@ class InputExample(object):
         self.thm = thm
         self.tac_id = tac_id
         self.is_negative = is_negative
+        self.weight = weight
 
 
 class PaddingInputExample(object):
@@ -76,6 +77,7 @@ class InputFeatures(object):
         thm_str,
         goal_input_mask,
         thm_input_mask,
+        weight,
         is_real_example=True,
     ):
 
@@ -88,6 +90,7 @@ class InputFeatures(object):
         self.is_real_example = is_real_example
         self.goal_str = goal_str
         self.thm_str = thm_str
+        self.weight = weight
 
 
 class DeepholProcessor:
@@ -124,6 +127,7 @@ class DeepholProcessor:
                 #  The values really don't matter, because we are using test set only as a hack to export a model.
                 goal = tokenization.convert_to_unicode(line[0])
                 thm = tokenization.convert_to_unicode(line[1])
+                weight = "1.0"
                 is_negative = "True"
                 tac_id = "0"
             else:
@@ -131,12 +135,14 @@ class DeepholProcessor:
                 thm = tokenization.convert_to_unicode(line[1])
                 is_negative = tokenization.convert_to_unicode(line[2])
                 tac_id = tokenization.convert_to_unicode(line[3])
+                weight = tokenization.convert_to_unicode(line[4])
             examples.append(
                 InputExample(
                     guid=guid,
                     goal=goal,
                     thm=thm,
                     tac_id=tac_id,
+                    weight=weight,
                     is_negative=is_negative,
                 )
             )
@@ -159,6 +165,7 @@ def convert_single_example(
             thm_str="",
             goal_input_mask=[0] * max_seq_length,
             thm_input_mask=[0] * max_seq_length,
+            weight=0.0,
         )
 
     tac_label_map = {}
@@ -208,6 +215,7 @@ def convert_single_example(
         thm_str=example.thm,
         goal_input_mask=goal_input_mask,
         thm_input_mask=thm_input_mask,
+        weight=example.weight,
     )
 
     return feature
@@ -237,6 +245,10 @@ def file_based_convert_examples_to_features(
             f = tf.train.Feature(int64_list=tf.train.Int64List(value=list(values)))
             return f
 
+        def create_float_feature(values):
+            f = tf.train.Feature(float_list=tf.train.FloatList(value=list(values)))
+            return f
+
         features = collections.OrderedDict()
         features["goal_input_ids"] = create_int_feature(feature.goal_input_ids)
         features["thm_input_ids"] = create_int_feature(feature.thm_input_ids)
@@ -245,6 +257,7 @@ def file_based_convert_examples_to_features(
         features["is_real_example"] = create_int_feature([int(feature.is_real_example)])
         features["goal_input_mask"] = create_int_feature(feature.goal_input_mask)
         features["thm_input_mask"] = create_int_feature(feature.thm_input_mask)
+        features["weight"] = create_float_feature([float(feature.weight)])
 
         tf_example = tf.train.Example(features=tf.train.Features(feature=features))
         writer.write(tf_example.SerializeToString())
@@ -276,6 +289,10 @@ def test_set_convert_examples_to_features(
             f = tf.train.Feature(int64_list=tf.train.Int64List(value=list(values)))
             return f
 
+        def create_float_feature(values):
+            f = tf.train.Feature(float_list=tf.train.FloatList(value=list(values)))
+            return f
+
         features = collections.OrderedDict()
         features["goal_input_ids"] = create_int_feature(feature.goal_input_ids)
         features["thm_input_ids"] = create_int_feature(feature.thm_input_ids)
@@ -294,6 +311,7 @@ def test_set_convert_examples_to_features(
         )
         features["goal_input_mask"] = create_int_feature(feature.goal_input_mask)
         features["thm_input_mask"] = create_int_feature(feature.thm_input_mask)
+        features["weight"] = create_float_feature([float(feature.weight)])
 
         tf_example = tf.train.Example(features=tf.train.Features(feature=features))
         writer.write(tf_example.SerializeToString())

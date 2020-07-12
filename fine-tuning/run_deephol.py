@@ -55,6 +55,7 @@ def file_based_input_fn_builder(input_file, seq_length, is_training, drop_remain
         "is_real_example": tf.FixedLenFeature([], tf.int64),
         "goal_input_mask": tf.FixedLenFeature([seq_length], tf.int64),
         "thm_input_mask": tf.FixedLenFeature([seq_length], tf.int64),
+        "weight": tf.FixedLenFeature([], tf.float32),
     }
 
     def _decode_record(record, name_to_features):
@@ -110,6 +111,7 @@ def build_predict_fake_input_fn(input_file, seq_length, drop_remainder):
         "thm_str": tf.FixedLenFeature((), tf.string, default_value=""),
         "goal_input_mask": tf.FixedLenFeature([seq_length], tf.int64),
         "thm_input_mask": tf.FixedLenFeature([seq_length], tf.int64),
+        "weight": tf.FixedLenFeature([], tf.float32),
     }
 
     def _decode_record(record, name_to_features):
@@ -202,7 +204,7 @@ def thm_encoding(
 
 
 def tactic_classifier(
-    goal_net, is_training, tac_ids, num_tac_labels, is_real_example, hidden_size
+    goal_net, is_training, tac_ids, num_tac_labels, is_real_example, hidden_size, weight,
 ):
     tf.add_to_collection("tactic_net", goal_net)
 
@@ -230,7 +232,7 @@ def tactic_classifier(
 
     # Compute the log loss for the tactic logits.
     log_prob_tactic = tf.losses.sparse_softmax_cross_entropy(
-        logits=tac_logits, labels=tac_ids, weights=is_real_example
+        logits=tac_logits, labels=tac_ids, weights=is_real_example * weight
     )
 
     tf.losses.add_loss(log_prob_tactic)
@@ -240,7 +242,7 @@ def tactic_classifier(
     return log_prob_tactic, tac_logits, tac_probabilities
 
 
-def pairwise_scorer(net, is_negative_labels, is_real_example):
+def pairwise_scorer(net, is_negative_labels, is_real_example, weight):
     # [batch_size, 1]
     par_logits = tf.layers.dense(net, 1, activation=None)
 
@@ -253,6 +255,7 @@ def pairwise_scorer(net, is_negative_labels, is_real_example):
         ),
         logits=par_logits,
         reduction=tf.losses.Reduction.SUM,
+        weights=tf.expand_dims(weight, 1),
     )
 
     tf.losses.add_loss(ce_loss * 0.5)
@@ -273,6 +276,7 @@ def create_model(
     is_real_example,
     use_one_hot_embeddings,
     hidden_size,
+    weight,
 ):
     with tf.variable_scope("encoder"):
         with tf.variable_scope("dilated_cnn_pairwise_encoder"):
@@ -309,12 +313,12 @@ def create_model(
 
     with tf.variable_scope("classifier"):
         (tac_loss, tac_logits, tac_probabilities,) = tactic_classifier(
-            goal_net, is_training, tac_ids, num_tac_labels, is_real_example, hidden_size
+            goal_net, is_training, tac_ids, num_tac_labels, is_real_example, hidden_size, weight,
         )
 
     with tf.variable_scope("pairwise_scorer"):
         (par_loss, par_logits) = pairwise_scorer(
-            net, is_negative_labels, is_real_example
+            net, is_negative_labels, is_real_example, weight,
         )
 
     total_loss = (0.5 * par_loss) + tac_loss
@@ -441,6 +445,7 @@ def model_fn_builder(
         thm_input_mask = features["thm_input_mask"]
         tac_ids = features["tac_ids"]
         is_negative = features["is_negative"]
+        weight = features["weight"]
 
         if "is_real_example" in features:
             is_real_example = tf.cast(features["is_real_example"], dtype=tf.float32)
@@ -469,6 +474,7 @@ def model_fn_builder(
             is_negative_labels=is_negative,
             use_one_hot_embeddings=use_one_hot_embeddings,
             hidden_size=bert_config.hidden_size,
+            weight=weight,
         )
 
         tvars = tf.trainable_variables()
@@ -876,6 +882,7 @@ def main(_):
             "goal_input_mask": tf.placeholder(
                 dtype=tf.int32, shape=[None, max_seq_length]
             ),
+            "weight": tf.placeholder(dtype=tf.float32, shape=[None]),
         }
         label_spec = {}
         build_input = tf.contrib.estimator.build_raw_supervised_input_receiver_fn

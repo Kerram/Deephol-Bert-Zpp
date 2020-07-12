@@ -39,11 +39,11 @@
     "fine-tuning": {        
         "data-generation": {
             "input_data_dir": "../data/augmented/",
-            "output_data_dir": "gs://zpp-bucket-1920/tpu-fine-tune/data/last_tests/test1"
+            "output_data_dir": "gs://zpp-bucket-1920/tpu-fine-tune/data/last_tests/test_weight"
         },
 
-        "model_dir": "gs://zpp-bucket-1920/tpu-fine-tune/models/last_tests/test1",
-        "export_dir": "gs://zpp-bucket-1920/tpu-fine-tune/exported/last_tests/test1",
+        "model_dir": "gs://zpp-bucket-1920/tpu-fine-tune/models/last_tests/test_weight",
+        "export_dir": "gs://zpp-bucket-1920/tpu-fine-tune/exported/last_tests/test_weight",
 
         "warmup_proportion": 0.1,
         "num_train_epochs": 3.0,
