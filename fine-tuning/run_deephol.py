@@ -260,6 +260,22 @@ def pairwise_scorer(net, is_negative_labels, is_real_example):
     return ce_loss, par_logits
 
 
+# PARAMS_COND_ON_TAC
+def _concat_net_tac_id(net, tac_ids, num_tac_labels):
+  """Concatenate net with one-hot vectors of tac_id."""
+  tf.add_to_collection('label_tac_id', tac_ids)
+
+  # shape: [batch_size, num_tactics]
+  label_tac_one_hot = tf.one_hot(tac_ids, num_tac_labels)
+  tf.add_to_collection('label_tac_one_hot', label_tac_one_hot)
+
+  # shape: [batch_size, hidden_size + num_tactics]
+  net = tf.concat([net, tf.to_float(label_tac_one_hot)], axis=1)
+  tf.add_to_collection('pfstate_and_tac', net)
+
+  return net
+
+
 def create_model(
     bert_config,
     goal_input_ids,
@@ -295,6 +311,10 @@ def create_model(
             # This attention-style concatenation performed well in language models.
             # Output shape: [batch_size, 3 * hidden_size]
             net = tf.concat([goal_net, thm_net, tf.multiply(goal_net, thm_net)], -1)
+
+            # PARAMS_COND_ON_TAC
+            # Concatenate one-hot encoding of tac_ids.
+            net = _concat_net_tac_id(net, tac_ids, num_tac_labels)
 
             if is_training:
                 net = tf.nn.dropout(net, rate=(1 - 0.7))
