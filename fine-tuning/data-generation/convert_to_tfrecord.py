@@ -74,15 +74,11 @@ class InputFeatures(object):
         is_negative,
         goal_str,
         thm_str,
-        goal_input_mask,
-        thm_input_mask,
         is_real_example=True,
     ):
 
         self.goal_input_ids = goal_input_ids
-        self.goal_input_mask = goal_input_mask
         self.thm_input_ids = thm_input_ids
-        self.thm_input_mask = thm_input_mask
         self.tac_id = tac_id
         self.is_negative = is_negative
         self.is_real_example = is_real_example
@@ -157,8 +153,6 @@ def convert_single_example(
             is_real_example=False,
             goal_str="",
             thm_str="",
-            goal_input_mask=[0] * max_seq_length,
-            thm_input_mask=[0] * max_seq_length,
         )
 
     tac_label_map = {}
@@ -169,13 +163,11 @@ def convert_single_example(
     for (i, label) in enumerate(is_negative_label_list):
         is_negative_label_map[label] = i
 
-    goal_input_ids, goal_input_mask = tokenizer.tokenize(example.goal, max_seq_length)
-    thm_input_ids, thm_input_mask = tokenizer.tokenize(example.thm, max_seq_length)
+    goal_input_ids = tokenizer.tokenize(example.goal, max_seq_length)
+    thm_input_ids = tokenizer.tokenize(example.thm, max_seq_length)
 
     assert len(goal_input_ids) == max_seq_length
     assert len(thm_input_ids) == max_seq_length
-    assert len(goal_input_mask) == max_seq_length
-    assert len(thm_input_mask) == max_seq_length
 
     tac_id = tac_label_map[example.tac_id]
     is_negative = is_negative_label_map[example.is_negative]
@@ -188,12 +180,6 @@ def convert_single_example(
         )
         tf.logging.info("thm_input_ids: %s" % " ".join([str(x) for x in thm_input_ids]))
         tf.logging.info("tac_id (example): %s" % (example.tac_id,))
-        tf.logging.info(
-            "goal_input_mask: %s" % " ".join([str(x) for x in goal_input_mask])
-        )
-        tf.logging.info(
-            "thm_input_mask: %s" % " ".join([str(x) for x in thm_input_mask])
-        )
         tf.logging.info("tac_id: %d" % (tac_id,))
         tf.logging.info("is_negative: %d" % (is_negative,))
         tf.logging.info("is_negative (example): %s" % (example.is_negative,))
@@ -206,8 +192,6 @@ def convert_single_example(
         is_real_example=True,
         goal_str=example.goal,
         thm_str=example.thm,
-        goal_input_mask=goal_input_mask,
-        thm_input_mask=thm_input_mask,
     )
 
     return feature
@@ -243,8 +227,6 @@ def file_based_convert_examples_to_features(
         features["tac_ids"] = create_int_feature([feature.tac_id])
         features["is_negative"] = create_int_feature([feature.is_negative])
         features["is_real_example"] = create_int_feature([int(feature.is_real_example)])
-        features["goal_input_mask"] = create_int_feature(feature.goal_input_mask)
-        features["thm_input_mask"] = create_int_feature(feature.thm_input_mask)
 
         tf_example = tf.train.Example(features=tf.train.Features(feature=features))
         writer.write(tf_example.SerializeToString())
@@ -292,8 +274,6 @@ def test_set_convert_examples_to_features(
                 value=[bytes(feature.thm_str, encoding="utf-8")]
             )
         )
-        features["goal_input_mask"] = create_int_feature(feature.goal_input_mask)
-        features["thm_input_mask"] = create_int_feature(feature.thm_input_mask)
 
         tf_example = tf.train.Example(features=tf.train.Features(feature=features))
         writer.write(tf_example.SerializeToString())

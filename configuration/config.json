@@ -39,11 +39,11 @@
     "fine-tuning": {        
         "data-generation": {
             "input_data_dir": "../data/augmented/",
-            "output_data_dir": "gs://zpp-bucket-1920/tpu-fine-tune/data/new_perf/bert"
+            "output_data_dir": "gs://zpp-bucket-1920/tpu-fine-tune/data/new_perf/wavenet"
         },
 
-        "model_dir": "gs://zpp-bucket-1920/tpu-fine-tune/models/new_perf/perf_bert",
-        "export_dir": "gs://zpp-bucket-1920/tpu-fine-tune/exported/new_perf/perf_bert",
+        "model_dir": "gs://zpp-bucket-1920/tpu-fine-tune/models/new_perf/perf_wavenet",
+        "export_dir": "gs://zpp-bucket-1920/tpu-fine-tune/exported/new_perf/perf_wavenet",
 
         "warmup_proportion": 0.1,
         "num_train_epochs": 1.0,
@@ -51,12 +51,12 @@
         "train_batch_size": 8,
         "eval_batch_size": 8,
 
-        "learning_rate": 1e-7,
+        "learning_rate": 1e-4,
 
         "save_checkpoint_steps": 1000000000,
         "iterations_per_loop": 100,
 
-        "tune_tpu_name": "test-tune",
-        "debug_tpu_name": "test-debug"
+        "tune_tpu_name": "bert3",
+        "debug_tpu_name": "bert4"
     }
 }

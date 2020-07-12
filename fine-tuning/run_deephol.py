@@ -16,7 +16,7 @@ sys.path.append("../../bert")
 
 import modeling
 import tokenization
-import optimization
+import wavenet
 
 flags = tf.flags
 
@@ -53,8 +53,6 @@ def file_based_input_fn_builder(input_file, seq_length, is_training, drop_remain
         "tac_ids": tf.FixedLenFeature([], tf.int64),
         "is_negative": tf.FixedLenFeature([], tf.int64),
         "is_real_example": tf.FixedLenFeature([], tf.int64),
-        "goal_input_mask": tf.FixedLenFeature([seq_length], tf.int64),
-        "thm_input_mask": tf.FixedLenFeature([seq_length], tf.int64),
     }
 
     def _decode_record(record, name_to_features):
@@ -108,8 +106,6 @@ def build_predict_fake_input_fn(input_file, seq_length, drop_remainder):
         "is_real_example": tf.FixedLenFeature([], tf.int64),
         "goal_str": tf.FixedLenFeature((), tf.string, default_value=""),
         "thm_str": tf.FixedLenFeature((), tf.string, default_value=""),
-        "goal_input_mask": tf.FixedLenFeature([seq_length], tf.int64),
-        "thm_input_mask": tf.FixedLenFeature([seq_length], tf.int64),
     }
 
     def _decode_record(record, name_to_features):
@@ -137,72 +133,91 @@ def build_predict_fake_input_fn(input_file, seq_length, drop_remainder):
     return input_fn
 
 
-def bert_encoding(
-    is_training,
-    bert_config,
-    input_ids,
-    input_mask,
-    segment_ids,
-    use_one_hot_embeddings,
-):
-    model = modeling.BertModel(
-        config=bert_config,
-        is_training=is_training,
-        input_ids=input_ids,
-        input_mask=input_mask,
-        token_type_ids=segment_ids,
-        use_one_hot_embeddings=use_one_hot_embeddings,
-    )
+def get_vocab_embedding(embedding_str, vocab_size):
+  return tf.get_variable(
+      embedding_str,
+      shape=(vocab_size, 128),
+      dtype=tf.float32)
 
-    output = model.get_pooled_output()
 
-    return output
+def _pad_to_multiple(value, size, axis, name=None):
+  """Pad a tensor with zeros on the right to a multiple of the given size.
+  Args:
+    value: Tensor to pad.
+    size: The result will be a multiple of `size` along `axis`.
+    axis: A nonnegative integer.
+    name: Optional name for this operation.
+  Returns:
+    Padded value.
+  """
+  with tf.name_scope(name, 'pad_to_multiple') as name:
+    length = tf.shape(value)[axis]
+    new_length = length // -size * -size  # Round up to multiple of size
+    return _pad_up_to(value, size=new_length, axis=axis, name=name)
+
+
+def wavenet_encoding(net):
+  """Embed a given input tensor using multiple wavenet blocks.
+  Arguments:
+    net: input tensor of shape [batch, text_length, word_embedding_size]
+  Returns:
+    output: output tensor of shape [batch, 1, text length, hidden_size]
+  """
+  net = _pad_to_multiple(net, 2**4, axis=1)
+  net = tf.expand_dims(net, 2)
+
+  for _ in range(2):
+    net = wavenet.wavenet_block(
+        net,
+        num_layers=4,
+        depth=128,
+        comb_weight=1.0,
+        keep_prob=1.0)
+  return net
 
 
 def goal_encoding(
-    is_training, bert_config, input_ids, input_mask, use_one_hot_embeddings,
+    vocab_size,
+    goal_ids,
 ):
-    segment_ids = tf.to_int32(tf.zeros(tf.shape(input_ids)))
+    goal_embedding = get_vocab_embedding('goal_embedding', vocab_size)
+    # output shape is [batch_size, goal length, word_embedding_size]
+    goal_net = tf.nn.embedding_lookup(goal_embedding, goal_ids)
+    tf.add_to_collection('goal_embedding', goal_net)
 
-    with tf.variable_scope("goal", reuse=False):
-        # output shape: [batch_size, hidden_size]
-        goal_net = bert_encoding(
-            is_training,
-            bert_config,
-            input_ids,
-            input_mask,
-            segment_ids,
-            use_one_hot_embeddings,
-        )
+    with tf.variable_scope('goal', reuse=False):
+        # output shape: [batch_size, 1, goal length, hidden_size]
+        goal_net = wavenet_encoding(goal_net)
+        # output shape is [batch_size, hidden_size]
+    goal_net = tf.reduce_max(goal_net, [1, 2])
 
-    tf.add_to_collection("goal_net", goal_net)
+    tf.add_to_collection('goal_net', goal_net)
 
     return goal_net
 
 
 def thm_encoding(
-    is_training, bert_config, input_ids, input_mask, use_one_hot_embeddings,
+    vocab_size,
+    thm_ids,
 ):
-    segment_ids = tf.to_int32(tf.zeros(tf.shape(input_ids)))
+    goal_embedding = get_vocab_embedding('goal_embedding', vocab_size)
+    # output shape is [batch_size, thm length, word_embedding_size]
+    thm_net = tf.nn.embedding_lookup(goal_embedding, thm_ids)
+    tf.add_to_collection('thm_embedding', thm_net)
 
-    with tf.variable_scope("thm", reuse=False):
-        # output shape: [batch_size, hidden_size]
-        thm_net = bert_encoding(
-            is_training,
-            bert_config,
-            input_ids,
-            input_mask,
-            segment_ids,
-            use_one_hot_embeddings,
-        )
+    with tf.variable_scope('thm', reuse=False):
+        # output shape: [batch_size, 1, thm length, hidden_size]
+        thm_net = wavenet_encoding(thm_net)
 
-    tf.add_to_collection("thm_net", thm_net)
+    # output shape is [batch_size, hidden_size]
+    thm_net = tf.reduce_max(thm_net, [1, 2])
+    tf.add_to_collection('thm_net', thm_net)
 
     return thm_net
 
 
 def tactic_classifier(
-    goal_net, is_training, tac_ids, num_tac_labels, is_real_example, hidden_size
+    goal_net, is_training, tac_ids, num_tac_labels, is_real_example
 ):
     tf.add_to_collection("tactic_net", goal_net)
 
@@ -261,34 +276,24 @@ def pairwise_scorer(net, is_negative_labels, is_real_example):
 
 
 def create_model(
-    bert_config,
+    vocab_size,
     goal_input_ids,
-    goal_input_mask,
     thm_input_ids,
-    thm_input_mask,
     tac_ids,
     num_tac_labels,
     is_negative_labels,
     is_training,
     is_real_example,
-    use_one_hot_embeddings,
-    hidden_size,
 ):
-    with tf.variable_scope("encoder"):
+    with tf.variable_scope("encoder", reuse=tf.AUTO_REUSE):
         with tf.variable_scope("dilated_cnn_pairwise_encoder"):
             goal_net = goal_encoding(
-                is_training,
-                bert_config,
+                vocab_size,
                 goal_input_ids,
-                goal_input_mask,
-                use_one_hot_embeddings,
             )
             thm_net = thm_encoding(
-                is_training,
-                bert_config,
+                vocab_size,
                 thm_input_ids,
-                thm_input_mask,
-                use_one_hot_embeddings,
             )
 
             # Concatenate theorem encoding, goal encoding, their dot product.
@@ -309,7 +314,7 @@ def create_model(
 
     with tf.variable_scope("classifier"):
         (tac_loss, tac_logits, tac_probabilities,) = tactic_classifier(
-            goal_net, is_training, tac_ids, num_tac_labels, is_real_example, hidden_size
+            goal_net, is_training, tac_ids, num_tac_labels, is_real_example
         )
 
     with tf.variable_scope("pairwise_scorer"):
@@ -367,24 +372,18 @@ def update_features_using_deephol(features, max_seq_length, vocab_file):
 
         goal = tensor_tokenizer.tokenize(features["goal_str"], max_seq_length)
 
-        goal_input_mask = tf.ones(tf.shape(goal))
         goal = _pad_up_to(goal, max_seq_length, 1)
-        goal_input_mask = _pad_up_to(goal_input_mask, max_seq_length, 1)
 
         features["goal_input_ids"] = goal
-        features["goal_input_mask"] = goal_input_mask
 
         tf.logging.info("********** Tokenization of theorem in Holist ********")
         tf.add_to_collection("thm_string", features["thm_str"])
 
         thm = tensor_tokenizer.tokenize(features["thm_str"], max_seq_length)
 
-        thm_input_mask = tf.ones(tf.shape(thm))
         thm = _pad_up_to(thm, max_seq_length, 1)
-        thm_input_mask = _pad_up_to(thm_input_mask, max_seq_length, 1)
 
         features["thm_input_ids"] = thm
-        features["thm_input_mask"] = thm_input_mask
 
 
 # Kuba's hack
@@ -410,14 +409,11 @@ class Remover:
 
 
 def model_fn_builder(
-    bert_config,
     num_tac_labels,
     init_checkpoint,
     learning_rate,
-    num_train_steps,
-    num_warmup_steps,
     use_tpu,
-    use_one_hot_embeddings,
+    vocab_size,
     max_seq_length,
     do_export,
     vocab_file,
@@ -437,8 +433,6 @@ def model_fn_builder(
 
         goal_input_ids = features["goal_input_ids"]
         thm_input_ids = features["thm_input_ids"]
-        goal_input_mask = features["goal_input_mask"]
-        thm_input_mask = features["thm_input_mask"]
         tac_ids = features["tac_ids"]
         is_negative = features["is_negative"]
 
@@ -457,48 +451,21 @@ def model_fn_builder(
             par_logits,
             tac_loss,
         ) = create_model(
-            bert_config=bert_config,
+            vocab_size=vocab_size,
             goal_input_ids=goal_input_ids,
-            goal_input_mask=goal_input_mask,
             thm_input_ids=thm_input_ids,
-            thm_input_mask=thm_input_mask,
             tac_ids=tac_ids,
             num_tac_labels=num_tac_labels,
             is_real_example=is_real_example,
             is_training=is_training,
             is_negative_labels=is_negative,
-            use_one_hot_embeddings=use_one_hot_embeddings,
-            hidden_size=bert_config.hidden_size,
         )
-
-        tvars = tf.trainable_variables()
-        initialized_variable_names = {}
 
         scaffold_fn = None
 
         if init_checkpoint:
-            (
-                assignment_map,
-                initialized_variable_names,
-            ) = modeling.get_assignment_map_from_checkpoint(tvars, init_checkpoint)
-
             if use_tpu:
-
                 def tpu_scaffold():
-                    tf.train.warm_start(
-                        init_checkpoint,
-                        "encoder/dilated_cnn_pairwise_encoder/thm/bert*",
-                        None,
-                        Remover(["encoder/dilated_cnn_pairwise_encoder/thm/"]),
-                    )
-
-                    tf.train.warm_start(
-                        init_checkpoint,
-                        "encoder/dilated_cnn_pairwise_encoder/goal/bert*",
-                        None,
-                        Remover(["encoder/dilated_cnn_pairwise_encoder/goal/"]),
-                    )
-
                     return tf.train.Scaffold()
 
                 scaffold_fn = tpu_scaffold
@@ -510,39 +477,23 @@ def model_fn_builder(
 
                 tf.train.warm_start(init_checkpoint, "pairwise_scorer/*")
 
-            else:
-                tf.train.warm_start(
-                    init_checkpoint,
-                    "encoder/dilated_cnn_pairwise_encoder/thm/bert*",
-                    None,
-                    Remover(["encoder/dilated_cnn_pairwise_encoder/thm/"]),
-                )
-
-                tf.train.warm_start(
-                    init_checkpoint,
-                    "encoder/dilated_cnn_pairwise_encoder/goal/bert*",
-                    None,
-                    Remover(["encoder/dilated_cnn_pairwise_encoder/goal/"]),
-                )
-
-        # These logs could not contain all variables!
-        tf.logging.info("**** Trainable Variables ****")
-        for var in tvars:
-            init_string = ""
-            if var.name in initialized_variable_names:
-                init_string = ", *INIT_FROM_CKPT*"
-            tf.logging.info(
-                "  name = %s, shape = %s%s", var.name, var.shape, init_string
-            )
-
         output_spec = None
 
         if mode == tf.estimator.ModeKeys.TRAIN:
             loss = tf.losses.get_total_loss()
 
-            train_op = optimization.create_optimizer(
-                loss, learning_rate, num_train_steps, num_warmup_steps, use_tpu
-            )
+            global_step = tf.train.get_or_create_global_step()
+            lr = tf.train.exponential_decay(
+                learning_rate=learning_rate,
+                global_step=global_step,
+                decay_steps=100000,
+                decay_rate=0.98)
+
+            opt = tf.train.AdamOptimizer(lr)
+            if use_tpu:
+                opt = tf.contrib.tpu.CrossShardOptimizer(opt)
+
+            train_op = opt.minimize(loss, global_step=global_step)
 
             output_spec = tf.contrib.tpu.TPUEstimatorSpec(
                 mode=mode, loss=loss, train_op=train_op, scaffold_fn=scaffold_fn,
@@ -678,7 +629,6 @@ def main(_):
 
     train_batch_size = configuration["fine-tuning"]["train_batch_size"]
     eval_batch_size = configuration["fine-tuning"]["eval_batch_size"]
-    warmup_proportion = configuration["fine-tuning"]["warmup_proportion"]
     num_train_epochs = configuration["fine-tuning"]["num_train_epochs"]
     learning_rate = configuration["fine-tuning"]["learning_rate"]
     save_checkpoint_steps = configuration["fine-tuning"]["save_checkpoint_steps"]
@@ -759,7 +709,6 @@ def main(_):
 
     train_examples_count = 0
     num_train_steps = None
-    num_warmup_steps = None
 
     tf.logging.info("Preparation completed!")
 
@@ -768,17 +717,13 @@ def main(_):
         num_train_steps = int(
             train_examples_count / train_batch_size * num_train_epochs
         )
-        num_warmup_steps = int(num_train_steps * warmup_proportion)
 
     model_fn = model_fn_builder(
-        bert_config=bert_config,
         num_tac_labels=len(tac_labels),
         init_checkpoint=init_checkpoint,
         learning_rate=learning_rate,
-        num_train_steps=num_train_steps,
-        num_warmup_steps=num_warmup_steps,
         use_tpu=FLAGS.use_tpu,
-        use_one_hot_embeddings=FLAGS.use_tpu,
+        vocab_size=2000,
         max_seq_length=max_seq_length,
         do_export=FLAGS.do_export,
         vocab_file=vocab_file,
@@ -870,12 +815,6 @@ def main(_):
             "is_real_example": tf.placeholder(dtype=tf.int32, shape=[None]),
             "goal_str": tf.placeholder(dtype=tf.string, shape=[None]),
             "thm_str": tf.placeholder(dtype=tf.string, shape=[None]),
-            "thm_input_mask": tf.placeholder(
-                dtype=tf.int32, shape=[None, max_seq_length]
-            ),
-            "goal_input_mask": tf.placeholder(
-                dtype=tf.int32, shape=[None, max_seq_length]
-            ),
         }
         label_spec = {}
         build_input = tf.contrib.estimator.build_raw_supervised_input_receiver_fn
