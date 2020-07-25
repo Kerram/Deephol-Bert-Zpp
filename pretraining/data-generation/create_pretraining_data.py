@@ -225,6 +225,7 @@ def create_masked_lm_predictions(tokens, masked_lm_prob,
                                  max_predictions_per_seq, vocab_words, rng):
   """Creates the predictions for the masked LM objective."""
   
+  print(GSG_PROB)
   gsg_prob = GSG_PROB
   masked_lms = []
   masked_subs = []
