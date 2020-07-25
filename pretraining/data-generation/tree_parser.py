@@ -51,3 +51,28 @@ def split_into_subtrees(sentence, max_size):
     pos = npos
 
   return ret
+
+def get_small_subtrees(sentence, min_size, max_size):
+  if len(sentence) < min_size:
+    return []
+
+  ret = []
+  if (len(sentence) <= max_size):
+    ret.append(sentence)
+
+  pos = 2
+  while pos + 1 < len(sentence):
+    npos = find_end_of_subtree(sentence, pos) + 1
+    ret.extend(get_small_subtrees(sentence[pos:npos], min_size, max_size))
+    pos = npos
+
+  return ret
+
+def find_subtree(tree, subtree):
+  for i in range (len(tree)):
+    for j in range (len(subtree)):
+      if (tree[i + j] != subtree[j]):
+        break
+
+      if (j == len(subtree ) - 1):
+        return i
