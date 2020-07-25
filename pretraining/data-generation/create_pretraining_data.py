@@ -207,10 +207,11 @@ def create_instances_from_document(
     if (not is_parsable(sentence)):
       print('not parsable: ', sentence)
       continue
-    subtrees = split_into_subtrees(sentence, max_num_tokens)
+    subtrees = split_into_subtrees(sentence, 2 * max_num_tokens)
 
     for subtree in subtrees:
       subtree = list(filter(lambda a: a != '(' and a != ')', subtree))
+      subtree = subtree[:max_num_tokens]
        
       tokens = ["[CLS]"] + subtree + ["[SEP]"]
       assert len(tokens) <= max_seq_length
