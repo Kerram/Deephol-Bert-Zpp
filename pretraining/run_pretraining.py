@@ -31,7 +31,7 @@ flags = tf.flags
 FLAGS = flags.FLAGS
 
 
-flags.DEFINE_string("configuration_dir", None, "Path to the configuration directory.")
+flags.DEFINE_string("configuration_dir", "../configuration", "Path to the configuration directory.")
 
 def model_fn_builder(
     bert_config,

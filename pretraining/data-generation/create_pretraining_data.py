@@ -36,7 +36,7 @@ flags = tf.flags
 
 FLAGS = flags.FLAGS
 
-flags.DEFINE_string("configuration_dir", None,
+flags.DEFINE_string("configuration_dir", "../../configuration/",
                     "Path to the configuration directory.")
 
 class TrainingInstance(object):
