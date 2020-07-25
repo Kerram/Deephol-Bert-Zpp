@@ -65,17 +65,10 @@ class TrainingInstance(object):
     return self.__str__()
 
 
-def write_instance_to_example_files(instances, tokenizer, max_seq_length,
-                                    max_predictions_per_seq, output_files):
-  """Create TF example files from `TrainingInstance`s."""
-  writers = []
-  for output_file in output_files:
-    writers.append(tf.python_io.TFRecordWriter(output_file))
-
-  writer_index = 0
-
-  total_written = 0
-  for (inst_index, instance) in enumerate(instances):
+def write_instance_to_example_files(instance, writer, tokenizer, max_seq_length,
+                                    max_predictions_per_seq, show_example=False):
+  
+    """Create TF example files from `TrainingInstance`s."""
     input_ids = tokenizer.convert_tokens_to_ids(instance.tokens)
     input_mask = [1] * len(input_ids)
     segment_ids = list(instance.segment_ids)
@@ -112,12 +105,9 @@ def write_instance_to_example_files(instances, tokenizer, max_seq_length,
 
     tf_example = tf.train.Example(features=tf.train.Features(feature=features))
 
-    writers[writer_index].write(tf_example.SerializeToString())
-    writer_index = (writer_index + 1) % len(writers)
+    writer.write(tf_example.SerializeToString())
 
-    total_written += 1
-
-    if inst_index < 20:
+    if show_example:
       tf.logging.info("*** Example ***")
       tf.logging.info("tokens: %s" % " ".join(instance.tokens))
 
@@ -131,11 +121,6 @@ def write_instance_to_example_files(instances, tokenizer, max_seq_length,
         tf.logging.info(
             "%s: %s" % (feature_name, " ".join([str(x) for x in values])))
 
-  for writer in writers:
-    writer.close()
-
-  tf.logging.info("Wrote %d total instances", total_written)
-
 
 def create_int_feature(values):
   feature = tf.train.Feature(int64_list=tf.train.Int64List(value=list(values)))
@@ -147,7 +132,7 @@ def create_float_feature(values):
   return feature
 
 
-def create_training_instances(input_files, tokenizer, max_seq_length,
+def create_training_instances(input_files, writers, tokenizer, max_seq_length,
                               dupe_factor, masked_lm_prob,
                               max_predictions_per_seq, rng):
   """Create `TrainingInstance`s from raw text."""
@@ -198,26 +183,23 @@ def create_training_instances(input_files, tokenizer, max_seq_length,
   bar2 = Progbar(dupe_factor)
   for _ in range(dupe_factor):
     for document_index in range(len(all_documents)):
-      instances.extend(
-          create_instances_from_document(
-              all_documents, document_index, max_seq_length,
-              masked_lm_prob, max_predictions_per_seq, vocab_words, rng))
+      create_instances_from_document(
+              all_documents, document_index, writers, tokenizer, max_seq_length,
+              masked_lm_prob, max_predictions_per_seq, vocab_words, rng)
     bar2.add(1)
 
-  rng.shuffle(instances)
-  return instances
-
-
 def create_instances_from_document(
-    all_documents, document_index, max_seq_length,
+    all_documents, document_index, writers, tokenizer, max_seq_length,
     masked_lm_prob, max_predictions_per_seq, vocab_words, rng):
   """Creates `TrainingInstance`s for a single document."""
   document = all_documents[document_index]
+  rng.shuffle(document)
 
   # Account for [CLS] and [SEP]
   max_num_tokens = max_seq_length - 2
 
-  instances = []
+  writer_index = 0
+  instances = 0
 
   for sentence in document:
     if (not is_parsable(sentence)):
@@ -244,13 +226,18 @@ def create_instances_from_document(
         masked_lm_positions=masked_lm_positions,
         masked_lm_labels=masked_lm_labels)
       
-      instances.append(instance)
-  return instances
+      show_example = instances < 50
+      
+      write_instance_to_example_files(
+        instance, writers[writer_index], tokenizer, max_seq_length, max_predictions_per_seq, show_example)
 
+      writer_index = (writer_index + 1) % len(writers)
+      instances += 1
+  
+  tf.logging.info("Wrote %d instances.\n", instances) 
 
 MaskedLmInstance = collections.namedtuple("MaskedLmInstance",
                                           ["index", "label"])
-
 
 def create_masked_lm_predictions(tokens, masked_lm_prob,
                                  max_predictions_per_seq, vocab_words, rng):
@@ -311,7 +298,6 @@ def add_conf_dir_to_paths(configuration, config_dir):
         config_dir, configuration["pretraining"]["data-generation"]["input_data_file"]
     )
 
-
 def main(_):
     with open(os.path.join(FLAGS.configuration_dir, "config.json")) as f:
         configuration = json.load(f)
@@ -337,32 +323,34 @@ def main(_):
     tokenizer = tokenization.SpaceTokenizer(vocab=vocab_file, vocab_size=bert_config.vocab_size)
 
     input_files = [input_data_file]
+    output_files = [os.path.join(output_data_dir, "train_{0:04d}.tfrecord".format(i)) for i in range(num_shards)]
 
     tf.logging.info("*** Reading from input files ***")
     for input_file in input_files:
         tf.logging.info("  %s", input_file)
+    
+    tf.logging.info("*** Writing to output files ***")
+    for output_file in output_files:
+        tf.logging.info("  %s", output_file)
+    
+    writers = []
+    for output_file in output_files:
+        writers.append(tf.python_io.TFRecordWriter(output_file))
 
     rng = random.Random(random_seed)
-    instances = create_training_instances(
+    create_training_instances(
         input_files,
+        writers,
         tokenizer,
         max_seq_length,
         dupe_factor,
         masked_lm_prob,
         max_predictions_per_seq,
-        rng,
+        rng
     )
-
-    output_files = [os.path.join(output_data_dir, "train_{0:04d}.tfrecord".format(i)) for i in range(num_shards)]
-
-    tf.logging.info("*** Writing to output files ***")
-    for output_file in output_files:
-        tf.logging.info("  %s", output_file)
-
-    write_instance_to_example_files(
-        instances, tokenizer, max_seq_length, max_predictions_per_seq, output_files
-    )
-
+    
+    for writer in writers:
+        writer.close()
 
 if __name__ == "__main__":
     flags.mark_flag_as_required("configuration_dir")
