@@ -39,6 +39,8 @@ FLAGS = flags.FLAGS
 flags.DEFINE_string("configuration_dir", "../../configuration/",
                     "Path to the configuration directory.")
 
+GSG_PROB = 0
+
 class TrainingInstance(object):
   """A single training instance (sentence pair)."""
 
@@ -242,25 +244,58 @@ MaskedLmInstance = collections.namedtuple("MaskedLmInstance",
 def create_masked_lm_predictions(tokens, masked_lm_prob,
                                  max_predictions_per_seq, vocab_words, rng):
   """Creates the predictions for the masked LM objective."""
+  
+  print(GSG_PROB)
+  gsg_prob = GSG_PROB
+  masked_lms = []
+  masked_subs = []
+  output_tokens = list(tokens)
+  gsg_to_cover = round(len(tokens) - 2) * gsg_prob
+
+  min_subtree_size = int(gsg_to_cover * 1 / 5)
+  max_subtree_size = int(gsg_to_cover)
+
+  subs = get_small_subtrees(tokens[1:-1], min_subtree_size, max_subtree_size)
+  rng.shuffle(subs)
+
+  cover_len = 0
+  for subtree in subs:
+    if (cover_len + len(subtree) > int(gsg_to_cover)):
+      break
+
+    cover_len += len(subtree)
+    masked_subs.append(subtree)
+
+  for subtree in masked_subs:
+    beg = find_subtree(tokens, subtree)
+
+    for pos in range(len(subtree)):
+      idx = beg + pos
+
+      # We don't want to cover any token twice
+      if (output_tokens[idx] != "[MASK2]"):
+        output_tokens[idx] = "[MASK2]"
+        masked_lms.append(MaskedLmInstance(index=idx, label=tokens[idx]))
+
 
   cand_indexes = []
   for (i, token) in enumerate(tokens):
-    if token == "[CLS]" or token == "[SEP]":
+    if token == "[CLS]" or token == "[SEP]" or output_tokens[i] == "[MASK2]":
       continue
     cand_indexes.append(i)
 
   rng.shuffle(cand_indexes)
+  gsg_masked = len(masked_lms)
 
-  output_tokens = list(tokens)
-
-  num_to_predict = min(max_predictions_per_seq,
+  num_to_predict = min(max_predictions_per_seq - gsg_masked,
                        max(1, int(round(len(tokens) * masked_lm_prob))))
 
-  masked_lms = []
+  covered_indexes = set()
   for index in cand_indexes:
-    if len(masked_lms) >= num_to_predict:
+    if len(masked_lms) >= num_to_predict + gsg_masked:
       break
 
+    convered_indexes.add(index)
     masked_token = None
     # 80% of the time, replace with [MASK]
     if rng.random() < 0.8:
@@ -276,7 +311,7 @@ def create_masked_lm_predictions(tokens, masked_lm_prob,
     output_tokens[index] = masked_token
     masked_lms.append(MaskedLmInstance(index=index, label=tokens[index]))
   
-  assert len(masked_lms) <= num_to_predict
+  assert len(masked_lms) <= num_to_predict + gsg_masked
   masked_lms = sorted(masked_lms, key=lambda x: x.index)
 
   masked_lm_positions = []
@@ -314,7 +349,8 @@ def main(_):
     ]
     masked_lm_prob = configuration["pretraining"]["data-generation"]["masked_lm_prob"]
     output_data_dir = configuration["pretraining"]["data-generation"]["output_data_dir"]
-    
+    GSG_PROB = configuration["pretraining"]["data-generation"]["gsg_prob"]
+
     bert_config_file = configuration["general"]["bert_config_file"]
     bert_config = modeling.BertConfig.from_json_file(bert_config_file)
 
