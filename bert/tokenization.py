@@ -46,7 +46,7 @@ def get_token_index(vocab_file, target_token):
     return target_index
 
 
-def load_vocab(vocab_file):
+def load_vocab(vocab_file, size):
     """Loads a vocabulary file into a dictionary."""
 
     unk_index = get_token_index(vocab_file, "[UNK]")
@@ -60,18 +60,30 @@ def load_vocab(vocab_file):
                 break
             token = token.strip()
 
-            if token not in vocab:
-                vocab[token] = index
-                index += 1
-            else:
-                print("ALARM!!!!")  # Legacy
+            assert token not in vocab
+            vocab[token] = index
+            index += 1
 
+    assert index == size
     return vocab
 
+class SpaceTokenizer(object):
+    def __init__(self, vocab, vocab_size):
+        self.vocab = load_vocab(vocab, vocab_size)
+
+    def tokenize(self, text):
+        text = text.strip().replace("(", " ( ").replace(")", " ) ")
+        words = text.split()
+
+        return words
+    
+    def convert_tokens_to_ids(self, tokens):
+        ids = list(map(lambda word: self.vocab[word], tokens))
+        return ids
 
 class WordSplitterTokenizer(object):
-    def __init__(self, vocab):
-        self.vocab = load_vocab(vocab)
+    def __init__(self, vocab, vocab_size):
+        self.vocab = load_vocab(vocab, vocab_size)
 
     def tokenize(self, text, max_seq_length):
         """Tokenizes string according to lookup table."""

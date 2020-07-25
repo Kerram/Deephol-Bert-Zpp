@@ -19,7 +19,6 @@ from __future__ import division
 from __future__ import print_function
 
 import sys
-
 sys.path.append("../../bert")
 
 from tensorflow.keras.utils import Progbar
@@ -36,325 +35,276 @@ flags = tf.flags
 
 FLAGS = flags.FLAGS
 
-flags.DEFINE_string("configuration_dir", None, "Path to the configuration directory.")
-
+flags.DEFINE_string("configuration_dir", None,
+                    "Path to the configuration directory.")
 
 class TrainingInstance(object):
-    """A single training instance (sentence pair)."""
+  """A single training instance (sentence pair)."""
 
-    def __init__(
-        self, tokens, segment_ids, masked_lm_positions, masked_lm_labels, is_random_next
-    ):
-        self.tokens = tokens
-        self.segment_ids = segment_ids
-        self.is_random_next = is_random_next
-        self.masked_lm_positions = masked_lm_positions
-        self.masked_lm_labels = masked_lm_labels
+  def __init__(self, tokens, segment_ids, masked_lm_positions, masked_lm_labels,
+               is_random_next):
+    self.tokens = tokens
+    self.segment_ids = segment_ids
+    self.is_random_next = is_random_next
+    self.masked_lm_positions = masked_lm_positions
+    self.masked_lm_labels = masked_lm_labels
 
-    def __str__(self):
-        s = ""
-        s += "tokens: %s\n" % (
-            " ".join([tokenization.printable_text(x) for x in self.tokens])
-        )
-        s += "segment_ids: %s\n" % (" ".join([str(x) for x in self.segment_ids]))
-        s += "is_random_next: %s\n" % self.is_random_next
-        s += "masked_lm_positions: %s\n" % (
-            " ".join([str(x) for x in self.masked_lm_positions])
-        )
-        s += "masked_lm_labels: %s\n" % (
-            " ".join([tokenization.printable_text(x) for x in self.masked_lm_labels])
-        )
-        s += "\n"
-        return s
+  def __str__(self):
+    s = ""
+    s += "tokens: %s\n" % (" ".join(self.tokens))
+    s += "segment_ids: %s\n" % (" ".join([str(x) for x in self.segment_ids]))
+    s += "is_random_next: %s\n" % self.is_random_next
+    s += "masked_lm_positions: %s\n" % (" ".join([str(x) for x in self.masked_lm_positions]))
+    s += "masked_lm_labels: %s\n" % (" ".join(
+        self.masked_lm_labels))
+    s += "\n"
+    return s
 
-    def __repr__(self):
-        return self.__str__()
+  def __repr__(self):
+    return self.__str__()
 
 
-def write_instance_to_example_files(
-    instances, tokenizer, max_seq_length, max_predictions_per_seq, output_files
-):
-    """Create TF example files from `TrainingInstance`s."""
-    writers = []
-    for output_file in output_files:
-        writers.append(tf.python_io.TFRecordWriter(output_file))
+def write_instance_to_example_files(instances, tokenizer, max_seq_length,
+                                    max_predictions_per_seq, output_files):
+  """Create TF example files from `TrainingInstance`s."""
+  writers = []
+  for output_file in output_files:
+    writers.append(tf.python_io.TFRecordWriter(output_file))
 
-    writer_index = 0
+  writer_index = 0
 
-    total_written = 0
-    for (inst_index, instance) in enumerate(instances):
-        input_ids = tokenizer.convert_tokens_to_ids(instance.tokens)
-        input_mask = [1] * len(input_ids)
-        segment_ids = list(instance.segment_ids)
-        assert len(input_ids) <= max_seq_length
+  total_written = 0
+  for (inst_index, instance) in enumerate(instances):
+    input_ids = tokenizer.convert_tokens_to_ids(instance.tokens)
+    input_mask = [1] * len(input_ids)
+    segment_ids = list(instance.segment_ids)
+    assert len(input_ids) <= max_seq_length
 
-        while len(input_ids) < max_seq_length:
-            input_ids.append(0)
-            input_mask.append(0)
-            segment_ids.append(0)
+    while len(input_ids) < max_seq_length:
+      input_ids.append(0)
+      input_mask.append(0)
+      segment_ids.append(0)
 
-        assert len(input_ids) == max_seq_length
-        assert len(input_mask) == max_seq_length
-        assert len(segment_ids) == max_seq_length
+    assert len(input_ids) == max_seq_length
+    assert len(input_mask) == max_seq_length
+    assert len(segment_ids) == max_seq_length
 
-        masked_lm_positions = list(instance.masked_lm_positions)
-        masked_lm_ids = tokenizer.convert_tokens_to_ids(instance.masked_lm_labels)
-        masked_lm_weights = [1.0] * len(masked_lm_ids)
+    masked_lm_positions = list(instance.masked_lm_positions)
+    masked_lm_ids = tokenizer.convert_tokens_to_ids(instance.masked_lm_labels)
+    masked_lm_weights = [1.0] * len(masked_lm_ids)
 
-        while len(masked_lm_positions) < max_predictions_per_seq:
-            masked_lm_positions.append(0)
-            masked_lm_ids.append(0)
-            masked_lm_weights.append(0.0)
+    while len(masked_lm_positions) < max_predictions_per_seq:
+      masked_lm_positions.append(0)
+      masked_lm_ids.append(0)
+      masked_lm_weights.append(0.0)
 
-        next_sentence_label = 1 if instance.is_random_next else 0
+    next_sentence_label = 1 if instance.is_random_next else 0
 
-        features = collections.OrderedDict()
-        features["input_ids"] = create_int_feature(input_ids)
-        features["input_mask"] = create_int_feature(input_mask)
-        features["segment_ids"] = create_int_feature(segment_ids)
-        features["masked_lm_positions"] = create_int_feature(masked_lm_positions)
-        features["masked_lm_ids"] = create_int_feature(masked_lm_ids)
-        features["masked_lm_weights"] = create_float_feature(masked_lm_weights)
-        features["next_sentence_labels"] = create_int_feature([next_sentence_label])
+    features = collections.OrderedDict()
+    features["input_ids"] = create_int_feature(input_ids)
+    features["input_mask"] = create_int_feature(input_mask)
+    features["segment_ids"] = create_int_feature(segment_ids)
+    features["masked_lm_positions"] = create_int_feature(masked_lm_positions)
+    features["masked_lm_ids"] = create_int_feature(masked_lm_ids)
+    features["masked_lm_weights"] = create_float_feature(masked_lm_weights)
+    features["next_sentence_labels"] = create_int_feature([next_sentence_label])
 
-        tf_example = tf.train.Example(features=tf.train.Features(feature=features))
+    tf_example = tf.train.Example(features=tf.train.Features(feature=features))
 
-        writers[writer_index].write(tf_example.SerializeToString())
-        writer_index = (writer_index + 1) % len(writers)
+    writers[writer_index].write(tf_example.SerializeToString())
+    writer_index = (writer_index + 1) % len(writers)
 
-        total_written += 1
+    total_written += 1
 
-        if inst_index < 20:
-            tf.logging.info("*** Example ***")
-            tf.logging.info(
-                "tokens: %s"
-                % " ".join([tokenization.printable_text(x) for x in instance.tokens])
-            )
+    if inst_index < 20:
+      tf.logging.info("*** Example ***")
+      tf.logging.info("tokens: %s" % " ".join(instance.tokens))
 
-            for feature_name in features.keys():
-                feature = features[feature_name]
-                values = []
-                if feature.int64_list.value:
-                    values = feature.int64_list.value
-                elif feature.float_list.value:
-                    values = feature.float_list.value
-                tf.logging.info(
-                    "%s: %s" % (feature_name, " ".join([str(x) for x in values]))
-                )
+      for feature_name in features.keys():
+        feature = features[feature_name]
+        values = []
+        if feature.int64_list.value:
+          values = feature.int64_list.value
+        elif feature.float_list.value:
+          values = feature.float_list.value
+        tf.logging.info(
+            "%s: %s" % (feature_name, " ".join([str(x) for x in values])))
 
-    for writer in writers:
-        writer.close()
+  for writer in writers:
+    writer.close()
 
-    tf.logging.info("Wrote %d total instances", total_written)
+  tf.logging.info("Wrote %d total instances", total_written)
 
 
 def create_int_feature(values):
-    feature = tf.train.Feature(int64_list=tf.train.Int64List(value=list(values)))
-    return feature
+  feature = tf.train.Feature(int64_list=tf.train.Int64List(value=list(values)))
+  return feature
 
 
 def create_float_feature(values):
-    feature = tf.train.Feature(float_list=tf.train.FloatList(value=list(values)))
-    return feature
+  feature = tf.train.Feature(float_list=tf.train.FloatList(value=list(values)))
+  return feature
 
 
-def create_training_instances(
-    input_files,
-    tokenizer,
-    max_seq_length,
-    dupe_factor,
-    masked_lm_prob,
-    max_predictions_per_seq,
-    rng,
-):
-    """Create `TrainingInstance`s from raw text."""
-    all_documents = [[]]
+def create_training_instances(input_files, tokenizer, max_seq_length,
+                              dupe_factor, masked_lm_prob,
+                              max_predictions_per_seq, rng):
+  """Create `TrainingInstance`s from raw text."""
+  all_documents = [[]]
 
-    vocab_words = list(tokenizer.vocab.keys())
+  vocab_words = list(tokenizer.vocab.keys())
 
-    # Input file format:
-    # (1) One sentence per line. These should ideally be actual sentences, not
-    # entire paragraphs or arbitrary spans of text. (Because we use the
-    # sentence boundaries for the "next sentence prediction" task).
-    # (2) Blank lines between documents. Document boundaries are needed so
-    # that the "next sentence prediction" task doesn't span between documents.
+  # Input file format:
+  # (1) One sentence per line. These should ideally be actual sentences, not
+  # entire paragraphs or arbitrary spans of text. (Because we use the
+  # sentence boundaries for the "next sentence prediction" task).
+  # (2) Blank lines between documents. Document boundaries are needed so
+  # that the "next sentence prediction" task doesn't span between documents.
+  
+  for input_file in input_files:
+    lines = 0
+    with tf.gfile.GFile(input_file, "r") as reader:
+      while True:
+        if not reader.readline():
+          break
+        lines += 1
 
-    for input_file in input_files:
-        lines = 0
-        with tf.gfile.GFile(input_file, "r") as reader:
-            while True:
-                if not reader.readline():
-                    break
-                lines += 1
+    bar = Progbar(lines)
 
-        bar = Progbar(lines)
+    with tf.gfile.GFile(input_file, "r") as reader:
+      while True:
+        line = tokenization.convert_to_unicode(reader.readline())
+        if not line:
+          break
+        line = line.strip()
 
-        with tf.gfile.GFile(input_file, "r") as reader:
-            while True:
-                line = tokenization.convert_to_unicode(reader.readline())
-                if not line:
-                    break
-                line = line.strip()
+        # Empty lines are used as document delimiters
+        if not line:
+          all_documents.append([])
+        tokens = tokenizer.tokenize(line)
+    
+        if tokens:
+          all_documents[-1].append(tokens)
+        bar.add(1)
 
-                # Empty lines are used as document delimiters
-                if not line:
-                    all_documents.append([])
-                tokens = tokenizer.tokenize(line, max_seq_length)
-                if tokens:
-                    all_documents[-1].append(tokens)
-                bar.add(1)
+  # Remove empty documents
+  
+  all_documents = [x for x in all_documents if x]
+  rng.shuffle(all_documents)
 
-    # Remove empty documents
-    all_documents = [x for x in all_documents if x]
-    rng.shuffle(all_documents)
+  instances = []
 
-    instances = []
+  bar2 = Progbar(dupe_factor)
+  for _ in range(dupe_factor):
+    for document_index in range(len(all_documents)):
+      instances.extend(
+          create_instances_from_document(
+              all_documents, document_index, max_seq_length,
+              masked_lm_prob, max_predictions_per_seq, vocab_words, rng))
+    bar2.add(1)
 
-    bar2 = Progbar(dupe_factor)
-    for _ in range(dupe_factor):
-        for document_index in range(len(all_documents)):
-            instances.extend(
-                create_instances_from_document(
-                    all_documents,
-                    document_index,
-                    max_seq_length,
-                    masked_lm_prob,
-                    max_predictions_per_seq,
-                    vocab_words,
-                    rng,
-                )
-            )
-        bar2.add(1)
-
-    rng.shuffle(instances)
-    return instances
+  rng.shuffle(instances)
+  return instances
 
 
 def create_instances_from_document(
-    all_documents,
-    document_index,
-    max_seq_length,
-    masked_lm_prob,
-    max_predictions_per_seq,
-    vocab_words,
-    rng,
-):
-    """Creates `TrainingInstance`s for a single document."""
-    document = all_documents[document_index]
+    all_documents, document_index, max_seq_length,
+    masked_lm_prob, max_predictions_per_seq, vocab_words, rng):
+  """Creates `TrainingInstance`s for a single document."""
+  document = all_documents[document_index]
 
-    # Account for [CLS] and [SEP]
-    max_num_tokens = max_seq_length - 2
+  # Account for [CLS] and [SEP]
+  max_num_tokens = max_seq_length - 2
 
-    instances = []
+  instances = []
 
-    for sentence in document:
-        if not is_parsable(sentence):
-            continue
-        subtrees = split_into_subtrees(sentence, 3 * max_num_tokens)
+  for sentence in document:
+    if (not is_parsable(sentence)):
+      print('not parsable: ', sentence)
+      continue
+    subtrees = split_into_subtrees(sentence, max_num_tokens)
 
-        for subtree in subtrees:
-            if 5 * len(subtree) < 3 * max_num_tokens:
-                continue
-            tokens = ["[CLS]"] + subtree + ["[SEP]"]
-            tokens = list(filter(lambda a: a != "(" and a != ")", tokens))
-            if len(tokens) > max_num_tokens:
-                tokens = tokens[:max_num_tokens]
-            segment_ids = [0] * len(tokens)
+    for subtree in subtrees:
+      subtree = list(filter(lambda a: a != '(' and a != ')', subtree))
+       
+      tokens = ["[CLS]"] + subtree + ["[SEP]"]
+      assert len(tokens) <= max_seq_length
 
-            (
-                tokens,
-                masked_lm_positions,
-                masked_lm_labels,
-            ) = create_masked_lm_predictions(
-                tokens, masked_lm_prob, max_predictions_per_seq, vocab_words, rng
-            )
+      segment_ids = [0] * len(tokens)
 
-            instance = TrainingInstance(
-                tokens=tokens,
-                segment_ids=segment_ids,
-                is_random_next=False,
-                masked_lm_positions=masked_lm_positions,
-                masked_lm_labels=masked_lm_labels,
-            )
-
-            instances.append(instance)
-    return instances
+      (tokens, masked_lm_positions, 
+        masked_lm_labels) = create_masked_lm_predictions(
+               tokens, masked_lm_prob, max_predictions_per_seq, vocab_words, rng)
+          
+      instance = TrainingInstance(
+        tokens=tokens,
+        segment_ids=segment_ids,
+        is_random_next=False,
+        masked_lm_positions=masked_lm_positions,
+        masked_lm_labels=masked_lm_labels)
+      
+      instances.append(instance)
+  return instances
 
 
-MaskedLmInstance = collections.namedtuple("MaskedLmInstance", ["index", "label"])
+MaskedLmInstance = collections.namedtuple("MaskedLmInstance",
+                                          ["index", "label"])
 
 
-def create_masked_lm_predictions(
-    tokens, masked_lm_prob, max_predictions_per_seq, vocab_words, rng
-):
-    """Creates the predictions for the masked LM objective."""
+def create_masked_lm_predictions(tokens, masked_lm_prob,
+                                 max_predictions_per_seq, vocab_words, rng):
+  """Creates the predictions for the masked LM objective."""
 
-    cand_indexes = []
-    for (i, token) in enumerate(tokens):
-        if token == "[CLS]" or token == "[SEP]":
-            continue
-        cand_indexes.append([i])
+  cand_indexes = []
+  for (i, token) in enumerate(tokens):
+    if token == "[CLS]" or token == "[SEP]":
+      continue
+    cand_indexes.append(i)
 
-    rng.shuffle(cand_indexes)
+  rng.shuffle(cand_indexes)
 
-    output_tokens = list(tokens)
+  output_tokens = list(tokens)
 
-    num_to_predict = min(
-        max_predictions_per_seq, max(1, int(round(len(tokens) * masked_lm_prob)))
-    )
+  num_to_predict = min(max_predictions_per_seq,
+                       max(1, int(round(len(tokens) * masked_lm_prob))))
 
-    masked_lms = []
-    covered_indexes = set()
-    for index_set in cand_indexes:
-        if len(masked_lms) >= num_to_predict:
-            break
-        # If adding a whole-word mask would exceed the maximum number of
-        # predictions, then just skip this candidate.
-        if len(masked_lms) + len(index_set) > num_to_predict:
-            continue
-        is_any_index_covered = False
-        for index in index_set:
-            if index in covered_indexes:
-                is_any_index_covered = True
-                break
-        if is_any_index_covered:
-            continue
-        for index in index_set:
-            covered_indexes.add(index)
+  masked_lms = []
+  for index in cand_indexes:
+    if len(masked_lms) >= num_to_predict:
+      break
 
-            masked_token = None
-            # 80% of the time, replace with [MASK]
-            if rng.random() < 0.8:
-                masked_token = "[MASK]"
-            else:
-                # 10% of the time, keep original
-                if rng.random() < 0.5:
-                    masked_token = tokens[index]
-                # 10% of the time, replace with random word
-                else:
-                    masked_token = vocab_words[rng.randint(0, len(vocab_words) - 1)]
+    masked_token = None
+    # 80% of the time, replace with [MASK]
+    if rng.random() < 0.8:
+      masked_token = "[MASK]"
+    else:
+      # 10% of the time, keep original
+      if rng.random() < 0.5:
+        masked_token = tokens[index]
+      # 10% of the time, replace with random word
+      else:
+        masked_token = vocab_words[rng.randint(0, len(vocab_words) - 1)]
 
-            output_tokens[index] = masked_token
+    output_tokens[index] = masked_token
+    masked_lms.append(MaskedLmInstance(index=index, label=tokens[index]))
+  
+  assert len(masked_lms) <= num_to_predict
+  masked_lms = sorted(masked_lms, key=lambda x: x.index)
 
-            masked_lms.append(MaskedLmInstance(index=index, label=tokens[index]))
-    assert len(masked_lms) <= num_to_predict
-    masked_lms = sorted(masked_lms, key=lambda x: x.index)
+  masked_lm_positions = []
+  masked_lm_labels = []
+  for p in masked_lms:
+    masked_lm_positions.append(p.index)
+    masked_lm_labels.append(p.label)
 
-    masked_lm_positions = []
-    masked_lm_labels = []
-    for p in masked_lms:
-        masked_lm_positions.append(p.index)
-        masked_lm_labels.append(p.label)
-
-    return (output_tokens, masked_lm_positions, masked_lm_labels)
-
+  return (output_tokens, masked_lm_positions, masked_lm_labels)
 
 def add_conf_dir_to_paths(configuration, config_dir):
     configuration["general"]["vocab_file"] = os.path.join(
         config_dir, configuration["general"]["vocab_file"]
     )
-    configuration["pretraining"]["data-generation"]["input_data_dir"] = os.path.join(
-        config_dir, configuration["pretraining"]["data-generation"]["input_data_dir"]
+    configuration["pretraining"]["data-generation"]["input_data_file"] = os.path.join(
+        config_dir, configuration["pretraining"]["data-generation"]["input_data_file"]
     )
 
 
@@ -364,7 +314,8 @@ def main(_):
         add_conf_dir_to_paths(configuration, FLAGS.configuration_dir)
 
     vocab_file = configuration["general"]["vocab_file"]
-    input_data_dir = configuration["pretraining"]["data-generation"]["input_data_dir"]
+    input_data_file = configuration["pretraining"]["data-generation"]["input_data_file"]
+    num_shards = configuration["pretraining"]["data-generation"]["num_shards"]
     random_seed = configuration["pretraining"]["data-generation"]["random_seed"]
     max_seq_length = configuration["general"]["max_seq_length"]
     dupe_factor = configuration["pretraining"]["data-generation"]["dupe_factor"]
@@ -376,9 +327,9 @@ def main(_):
 
     tf.logging.set_verbosity(tf.logging.INFO)
 
-    tokenizer = tokenization.WordSplitterTokenizer(vocab=vocab_file)
+    tokenizer = tokenization.SpaceTokenizer(vocab=vocab_file)
 
-    input_files = [os.path.join(input_data_dir, "train.json")]
+    input_files = [input_data_file]
 
     tf.logging.info("*** Reading from input files ***")
     for input_file in input_files:
@@ -395,7 +346,7 @@ def main(_):
         rng,
     )
 
-    output_files = [os.path.join(output_data_dir, "train.tfrecord")]
+    output_files = [os.path.join(output_data_dir, "train_{0:04d}.tfrecord".format(i)) for i in range(num_shards)]
 
     tf.logging.info("*** Writing to output files ***")
     for output_file in output_files:

@@ -18,113 +18,20 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import sys
+sys.path.append("../bert")
+
 import os
-from bert import modeling
-from bert import optimization
+import json
+import modeling
+import optimization
 import tensorflow as tf
 
 flags = tf.flags
-
 FLAGS = flags.FLAGS
 
-## Required parameters
-flags.DEFINE_string(
-    "bert_config_file",
-    None,
-    "The config json file corresponding to the pre-trained BERT model. "
-    "This specifies the model architecture.",
-)
 
-flags.DEFINE_string(
-    "input_file", None, "Input TF example files (can be a glob or comma separated)."
-)
-
-flags.DEFINE_string(
-    "output_dir",
-    None,
-    "The output directory where the model checkpoints will be written.",
-)
-
-## Other parameters
-flags.DEFINE_string(
-    "init_checkpoint",
-    None,
-    "Initial checkpoint (usually from a pre-trained BERT model).",
-)
-
-flags.DEFINE_integer(
-    "max_seq_length",
-    512,
-    "The maximum total input sequence length after WordPiece tokenization. "
-    "Sequences longer than this will be truncated, and sequences shorter "
-    "than this will be padded. Must match data generation.",
-)
-
-flags.DEFINE_integer(
-    "max_predictions_per_seq",
-    80,
-    "Maximum number of masked LM predictions per sequence. "
-    "Must match data generation.",
-)
-
-flags.DEFINE_bool("do_train", False, "Whether to run training.")
-
-flags.DEFINE_bool("do_eval", False, "Whether to run eval on the dev set.")
-
-flags.DEFINE_integer("train_batch_size", 32, "Total batch size for training.")
-
-flags.DEFINE_integer("eval_batch_size", 8, "Total batch size for eval.")
-
-flags.DEFINE_float("learning_rate", 5e-5, "The initial learning rate for Adam.")
-
-flags.DEFINE_integer("num_train_steps", 100000, "Number of training steps.")
-
-flags.DEFINE_integer("num_warmup_steps", 10000, "Number of warmup steps.")
-
-flags.DEFINE_integer(
-    "save_checkpoints_steps", 1000, "How often to save the model checkpoint."
-)
-
-flags.DEFINE_integer(
-    "iterations_per_loop", 1000, "How many steps to make in each estimator call."
-)
-
-flags.DEFINE_integer("max_eval_steps", 100, "Maximum number of eval steps.")
-
-flags.DEFINE_bool("use_tpu", False, "Whether to use TPU or GPU/CPU.")
-
-tf.flags.DEFINE_string(
-    "tpu_name",
-    None,
-    "The Cloud TPU to use for training. This should be either the name "
-    "used when creating the Cloud TPU, or a grpc://ip.address.of.tpu:8470 "
-    "url.",
-)
-
-tf.flags.DEFINE_string(
-    "tpu_zone",
-    None,
-    "[Optional] GCE zone where the Cloud TPU is located in. If not "
-    "specified, we will attempt to automatically detect the GCE project from "
-    "metadata.",
-)
-
-tf.flags.DEFINE_string(
-    "gcp_project",
-    None,
-    "[Optional] Project name for the Cloud TPU-enabled project. If not "
-    "specified, we will attempt to automatically detect the GCE project from "
-    "metadata.",
-)
-
-tf.flags.DEFINE_string("master", None, "[Optional] TensorFlow master URL.")
-
-flags.DEFINE_integer(
-    "num_tpu_cores",
-    8,
-    "Only used if `use_tpu` is True. Total number of TPU cores to use.",
-)
-
+flags.DEFINE_string("configuration_dir", None, "Path to the configuration directory.")
 
 def model_fn_builder(
     bert_config,
@@ -469,97 +376,126 @@ def _decode_record(record, name_to_features):
     return example
 
 
+def add_conf_dir_to_paths(configuration, config_dir):
+    configuration["general"]["vocab_file"] = os.path.join(
+        config_dir, configuration["general"]["vocab_file"]
+    )
+    configuration["general"]["bert_config_file"] = os.path.join(
+        config_dir, configuration["general"]["bert_config_file"]
+    )
+
 def main(_):
+    with open(os.path.join(FLAGS.configuration_dir, "config.json")) as f:
+        configuration = json.load(f)
+        add_conf_dir_to_paths(configuration, FLAGS.configuration_dir)
+
+    vocab_file = configuration["general"]["vocab_file"]
+    bert_config_file = configuration["general"]["bert_config_file"]
+    num_tpu_cores = configuration["general"]["num_tpu_cores"]
+    gcp_project = configuration["general"]["gcp_project"]
+    tpu_zone = configuration["general"]["tpu_zone"]
+    max_seq_length = configuration["general"]["max_seq_length"]
+
+    input_data_dir = configuration["pretraining"]["data-generation"]["output_data_dir"]
+    max_predictions_per_seq = configuration["pretraining"]["data-generation"]["max_predictions_per_seq"]
+
+    model_dir = configuration["pretraining"]["model_dir"]
+    train_batch_size = configuration["pretraining"]["train_batch_size"]
+    eval_batch_size = configuration["pretraining"]["eval_batch_size"]
+    learning_rate = configuration["pretraining"]["learning_rate"]
+    num_train_steps = configuration["pretraining"]["num_train_steps"]
+    warmup_proportion = configuration["pretraining"]["warmup_proportion"]
+    max_eval_steps = configuration["pretraining"]["max_eval_steps"]
+    save_checkpoints_steps = configuration["pretraining"]["save_checkpoints_steps"]
+    iterations_per_loop = configuration["pretraining"]["iterations_per_loop"]
+    tpu_name = configuration["pretraining"]["tpu_name"]
+
+    assert tpu_name is not None
+
+
     tf.logging.set_verbosity(tf.logging.INFO)
 
-    if not FLAGS.do_train and not FLAGS.do_eval:
-        raise ValueError("At least one of `do_train` or `do_eval` must be True.")
+    bert_config = modeling.BertConfig.from_json_file(bert_config_file)
 
-    bert_config = modeling.BertConfig.from_json_file(FLAGS.bert_config_file)
+    tf.gfile.MakeDirs(model_dir)
 
-    tf.gfile.MakeDirs(FLAGS.output_dir)
-
-    input_files = []
-    for input_pattern in FLAGS.input_file.split(","):
-        input_files.extend(tf.gfile.Glob(input_pattern))
+    input_files = tf.gfile.Glob(os.path.join(input_data_dir, "*"))
 
     tf.logging.info("*** Input Files ***")
     for input_file in input_files:
         tf.logging.info("  %s" % input_file)
 
     tpu_cluster_resolver = None
-    if FLAGS.use_tpu and FLAGS.tpu_name:
-        tpu_cluster_resolver = tf.contrib.cluster_resolver.TPUClusterResolver(
-            FLAGS.tpu_name, zone=FLAGS.tpu_zone, project=FLAGS.gcp_project
+    tpu_cluster_resolver = tf.contrib.cluster_resolver.TPUClusterResolver(
+            tpu_name, zone=tpu_zone, project=gcp_project
         )
 
     is_per_host = tf.contrib.tpu.InputPipelineConfig.PER_HOST_V2
     run_config = tf.contrib.tpu.RunConfig(
         cluster=tpu_cluster_resolver,
-        master=FLAGS.master,
-        model_dir=FLAGS.output_dir,
-        save_checkpoints_steps=FLAGS.save_checkpoints_steps,
+        master=None,
+        model_dir=model_dir,
+        save_checkpoints_steps=save_checkpoints_steps,
         tpu_config=tf.contrib.tpu.TPUConfig(
-            iterations_per_loop=FLAGS.iterations_per_loop,
-            num_shards=FLAGS.num_tpu_cores,
+            iterations_per_loop=iterations_per_loop,
+            num_shards=num_tpu_cores,
             per_host_input_for_training=is_per_host,
         ),
     )
 
+    num_warmup_steps = int(num_train_steps * warmup_proportion)
+
     model_fn = model_fn_builder(
         bert_config=bert_config,
-        init_checkpoint=FLAGS.init_checkpoint,
-        learning_rate=FLAGS.learning_rate,
-        num_train_steps=FLAGS.num_train_steps,
-        num_warmup_steps=FLAGS.num_warmup_steps,
-        use_tpu=FLAGS.use_tpu,
-        use_one_hot_embeddings=FLAGS.use_tpu,
+        init_checkpoint=None,
+        learning_rate=learning_rate,
+        num_train_steps=num_train_steps,
+        num_warmup_steps=num_warmup_steps,
+        use_tpu=True,
+        use_one_hot_embeddings=True,
     )
 
     # If TPU is not available, this will fall back to normal Estimator on CPU
     # or GPU.
     estimator = tf.contrib.tpu.TPUEstimator(
-        use_tpu=FLAGS.use_tpu,
+        use_tpu=True,
         model_fn=model_fn,
         config=run_config,
-        train_batch_size=FLAGS.train_batch_size,
-        eval_batch_size=FLAGS.eval_batch_size,
+        train_batch_size=train_batch_size,
+        eval_batch_size=eval_batch_size,
     )
 
-    if FLAGS.do_train:
-        tf.logging.info("***** Running training *****")
-        tf.logging.info("  Batch size = %d", FLAGS.train_batch_size)
-        train_input_fn = input_fn_builder(
-            input_files=input_files,
-            max_seq_length=FLAGS.max_seq_length,
-            max_predictions_per_seq=FLAGS.max_predictions_per_seq,
-            is_training=True,
-        )
-        estimator.train(input_fn=train_input_fn, max_steps=FLAGS.num_train_steps)
+    tf.logging.info("***** Running training *****")
+    tf.logging.info("  Batch size = %d", train_batch_size)
+    train_input_fn = input_fn_builder(
+        input_files=input_files,
+        max_seq_length=max_seq_length,
+        max_predictions_per_seq=max_predictions_per_seq,
+        is_training=True,
+    )
+    estimator.train(input_fn=train_input_fn, max_steps=num_train_steps)
 
-    if FLAGS.do_eval:
-        tf.logging.info("***** Running evaluation *****")
-        tf.logging.info("  Batch size = %d", FLAGS.eval_batch_size)
+    tf.logging.info("***** Running evaluation *****")
+    tf.logging.info("  Batch size = %d", eval_batch_size)
 
-        eval_input_fn = input_fn_builder(
-            input_files=input_files,
-            max_seq_length=FLAGS.max_seq_length,
-            max_predictions_per_seq=FLAGS.max_predictions_per_seq,
-            is_training=False,
-        )
+    eval_input_fn = input_fn_builder(
+	input_files=input_files,
+	max_seq_length=max_seq_length,
+	max_predictions_per_seq=max_predictions_per_seq,
+	is_training=False,
+    )
 
-        result = estimator.evaluate(input_fn=eval_input_fn, steps=FLAGS.max_eval_steps)
+    result = estimator.evaluate(input_fn=eval_input_fn, steps=max_eval_steps)
 
-        output_eval_file = os.path.join(FLAGS.output_dir, "eval_results.txt")
-        with tf.gfile.GFile(output_eval_file, "w") as writer:
-            tf.logging.info("***** Eval results *****")
-            for key in sorted(result.keys()):
-                tf.logging.info("  %s = %s", key, str(result[key]))
-                writer.write("%s = %s\n" % (key, str(result[key])))
+    output_eval_file = os.path.join(model_dir, "eval_results.txt")
+    with tf.gfile.GFile(output_eval_file, "w") as writer:
+        tf.logging.info("***** Eval results *****")
+        for key in sorted(result.keys()):
+            tf.logging.info("  %s = %s", key, str(result[key]))
+            writer.write("%s = %s\n" % (key, str(result[key])))
+
 
 
 if __name__ == "__main__":
-    flags.mark_flag_as_required("input_file")
-    flags.mark_flag_as_required("bert_config_file")
-    flags.mark_flag_as_required("output_dir")
+    flags.mark_flag_as_required("configuration_dir")
     tf.app.run()

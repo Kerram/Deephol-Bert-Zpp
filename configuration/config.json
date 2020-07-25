@@ -10,16 +10,16 @@
 
     "pretraining": {
         "data-generation": {
-            "input_data_dir": "../data/raw/",
+            "input_data_file": "../data/pretraining/all.train",
+	    "num_shards": 100,
             "output_data_dir": null,
             "max_predictions_per_seq": 80,
             "random_seed": 12345,
-            "dupe_factor": 2,
+            "dupe_factor": 4,
             "masked_lm_prob": 0.15
         },
 
-        "model_dir": "gs://zpp-bucket-1920/bert-bucket-golkarolka/bert_model11",
-
+        "model_dir": null, 
         "train_batch_size": 32,
         "eval_batch_size": 8,
 
@@ -30,7 +30,7 @@
 
         "max_eval_steps": 100000,
 
-        "save_checkpoint_steps": 10000,
+        "save_checkpoints_steps": 10000,
         "iterations_per_loop": 1000,
 
         "tpu_name": null
