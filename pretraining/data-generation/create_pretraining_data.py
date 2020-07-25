@@ -22,7 +22,7 @@ import sys
 sys.path.append("../../bert")
 
 from tensorflow.keras.utils import Progbar
-from tree_parser import is_parsable, split_into_subtrees
+from tree_parser import is_parsable, split_into_subtrees, get_small_subtrees, find_subtree
 
 import collections
 import random
@@ -225,7 +225,6 @@ def create_masked_lm_predictions(tokens, masked_lm_prob,
                                  max_predictions_per_seq, vocab_words, rng):
   """Creates the predictions for the masked LM objective."""
   
-  print(GSG_PROB)
   gsg_prob = GSG_PROB
   masked_lms = []
   masked_subs = []
@@ -275,7 +274,7 @@ def create_masked_lm_predictions(tokens, masked_lm_prob,
     if len(masked_lms) >= num_to_predict + gsg_masked:
       break
 
-    convered_indexes.add(index)
+    covered_indexes.add(index)
     masked_token = None
     # 80% of the time, replace with [MASK]
     if rng.random() < 0.8:
@@ -314,6 +313,8 @@ def add_conf_dir_to_paths(configuration, config_dir):
     )
 
 def main(_):
+    global GSG_PROB
+    
     with open(os.path.join(FLAGS.configuration_dir, "config.json")) as f:
         configuration = json.load(f)
         add_conf_dir_to_paths(configuration, FLAGS.configuration_dir)
