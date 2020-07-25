@@ -29,6 +29,7 @@ import random
 import json
 import os
 import tokenization
+import modeling
 import tensorflow as tf
 
 flags = tf.flags
@@ -303,6 +304,9 @@ def add_conf_dir_to_paths(configuration, config_dir):
     configuration["general"]["vocab_file"] = os.path.join(
         config_dir, configuration["general"]["vocab_file"]
     )
+    configuration["general"]["bert_config_file"] = os.path.join(
+        config_dir, configuration["general"]["bert_config_file"]
+    )
     configuration["pretraining"]["data-generation"]["input_data_file"] = os.path.join(
         config_dir, configuration["pretraining"]["data-generation"]["input_data_file"]
     )
@@ -324,10 +328,13 @@ def main(_):
     ]
     masked_lm_prob = configuration["pretraining"]["data-generation"]["masked_lm_prob"]
     output_data_dir = configuration["pretraining"]["data-generation"]["output_data_dir"]
+    
+    bert_config_file = configuration["general"]["bert_config_file"]
+    bert_config = modeling.BertConfig.from_json_file(bert_config_file)
 
     tf.logging.set_verbosity(tf.logging.INFO)
 
-    tokenizer = tokenization.SpaceTokenizer(vocab=vocab_file)
+    tokenizer = tokenization.SpaceTokenizer(vocab=vocab_file, vocab_size=bert_config.vocab_size)
 
     input_files = [input_data_file]
 
