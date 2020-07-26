@@ -39,6 +39,8 @@ FLAGS = flags.FLAGS
 flags.DEFINE_string("configuration_dir", "../../configuration/",
                     "Path to the configuration directory.")
 
+flags.DEFINE_integer("num_show_examples", 20, "Number of examples to show")
+
 class TrainingInstance(object):
   """A single training instance (sentence pair)."""
 
@@ -66,7 +68,7 @@ class TrainingInstance(object):
 
 
 def write_instance_to_example_files(instance, writer, tokenizer, max_seq_length,
-                                    max_predictions_per_seq, show_example=False):
+                                    max_predictions_per_seq, only_show=False):
   
     """Create TF example files from `TrainingInstance`s."""
     input_ids = tokenizer.convert_tokens_to_ids(instance.tokens)
@@ -105,9 +107,7 @@ def write_instance_to_example_files(instance, writer, tokenizer, max_seq_length,
 
     tf_example = tf.train.Example(features=tf.train.Features(feature=features))
 
-    writer.write(tf_example.SerializeToString())
-
-    if show_example:
+    if only_show:
       tf.logging.info("*** Example ***")
       tf.logging.info("tokens: %s" % " ".join(instance.tokens))
 
@@ -120,6 +120,8 @@ def write_instance_to_example_files(instance, writer, tokenizer, max_seq_length,
           values = feature.float_list.value
         tf.logging.info(
             "%s: %s" % (feature_name, " ".join([str(x) for x in values])))
+    else:
+      writer.write(tf_example.SerializeToString())
 
 
 def create_int_feature(values):
@@ -132,67 +134,44 @@ def create_float_feature(values):
   return feature
 
 
-def create_training_instances(input_files, writers, tokenizer, max_seq_length,
+def create_training_instances(shard_offset, input_files, writers, tokenizer, max_seq_length,
                               dupe_factor, masked_lm_prob,
                               max_predictions_per_seq, rng):
-  """Create `TrainingInstance`s from raw text."""
-  all_documents = [[]]
 
+  shard_pos, num_shard = shard_offset
+
+  document = []
   vocab_words = list(tokenizer.vocab.keys())
 
-  # Input file format:
-  # (1) One sentence per line. These should ideally be actual sentences, not
-  # entire paragraphs or arbitrary spans of text. (Because we use the
-  # sentence boundaries for the "next sentence prediction" task).
-  # (2) Blank lines between documents. Document boundaries are needed so
-  # that the "next sentence prediction" task doesn't span between documents.
-  
   for input_file in input_files:
-    lines = 0
     with tf.gfile.GFile(input_file, "r") as reader:
-      while True:
-        if not reader.readline():
-          break
-        lines += 1
-
-    bar = Progbar(lines)
-
-    with tf.gfile.GFile(input_file, "r") as reader:
-      while True:
-        line = tokenization.convert_to_unicode(reader.readline())
-        if not line:
-          break
-        line = line.strip()
-
-        # Empty lines are used as document delimiters
-        if not line:
-          all_documents.append([])
-        tokens = tokenizer.tokenize(line)
+      for i, line in enumerate(reader):
+        if i % num_shard == shard_pos:
+          line = tokenization.convert_to_unicode(line).strip()
+          tokens = tokenizer.tokenize(line)
     
-        if tokens:
-          all_documents[-1].append(tokens)
-        bar.add(1)
+          if tokens:
+            document.append(tokens)
 
-  # Remove empty documents
-  
-  all_documents = [x for x in all_documents if x]
-  rng.shuffle(all_documents)
+  rng.shuffle(document)
 
-  instances = []
+  all_examples = []
+  all_instances = 0
 
-  bar2 = Progbar(dupe_factor)
   for _ in range(dupe_factor):
-    for document_index in range(len(all_documents)):
-      create_instances_from_document(
-              all_documents, document_index, writers, tokenizer, max_seq_length,
-              masked_lm_prob, max_predictions_per_seq, vocab_words, rng)
-    bar2.add(1)
+    examples, instances = create_instances_from_document(
+        document, writers, tokenizer, max_seq_length,
+        masked_lm_prob, max_predictions_per_seq, vocab_words, rng)
+
+    all_examples.extend(examples)
+    all_instances += instances
+
+  return all_examples, all_instances
 
 def create_instances_from_document(
-    all_documents, document_index, writers, tokenizer, max_seq_length,
+    document, writers, tokenizer, max_seq_length,
     masked_lm_prob, max_predictions_per_seq, vocab_words, rng):
   """Creates `TrainingInstance`s for a single document."""
-  document = all_documents[document_index]
   rng.shuffle(document)
 
   # Account for [CLS] and [SEP]
@@ -200,6 +179,7 @@ def create_instances_from_document(
 
   writer_index = 0
   instances = 0
+  examples = []
 
   for sentence in document:
     if (not is_parsable(sentence)):
@@ -225,16 +205,17 @@ def create_instances_from_document(
         is_random_next=False,
         masked_lm_positions=masked_lm_positions,
         masked_lm_labels=masked_lm_labels)
-      
-      show_example = instances < 50
+
+      if instances < FLAGS.num_show_examples:
+        examples.append(instance)
       
       write_instance_to_example_files(
-        instance, writers[writer_index], tokenizer, max_seq_length, max_predictions_per_seq, show_example)
+        instance, writers[writer_index], tokenizer, max_seq_length, max_predictions_per_seq)
 
       writer_index = (writer_index + 1) % len(writers)
       instances += 1
-  
-  tf.logging.info("Wrote %d instances.\n", instances) 
+
+  return examples, instances
 
 MaskedLmInstance = collections.namedtuple("MaskedLmInstance",
                                           ["index", "label"])
@@ -338,17 +319,32 @@ def main(_):
         writers.append(tf.python_io.TFRecordWriter(output_file))
 
     rng = random.Random(random_seed)
-    create_training_instances(
-        input_files,
-        writers,
-        tokenizer,
-        max_seq_length,
-        dupe_factor,
-        masked_lm_prob,
-        max_predictions_per_seq,
-        rng
-    )
+
+    bar = Progbar(num_shards)
+    instances_written = 0
+    all_examples = []
+    for i in range(num_shards):
+        bar.add(1)
+        examples, instances = create_training_instances((i, num_shards),
+            input_files,
+            writers,
+            tokenizer,
+            max_seq_length,
+            dupe_factor,
+            masked_lm_prob, 
+            max_predictions_per_seq, 
+            rng)
+
+        instances_written += instances
+        all_examples.extend(examples)
     
+    rng.shuffle(all_examples)
+    for example in all_examples[:FLAGS.num_show_examples]:
+      write_instance_to_example_files(example, None, tokenizer, max_seq_length,
+                                      max_predictions_per_seq, True)
+    
+    tf.logging.info("Wrote %d instances.\n", instances_written)
+
     for writer in writers:
         writer.close()
 
