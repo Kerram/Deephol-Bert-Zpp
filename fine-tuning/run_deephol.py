@@ -202,26 +202,26 @@ def thm_encoding(
 
 
 def tactic_classifier(
-    goal_net, is_training, tac_ids, num_tac_labels, is_real_example, hidden_size
+    goal_net, is_training, tac_ids, num_tac_labels, is_real_example, hidden_size, tactic_classifier_dropout
 ):
     tf.add_to_collection("tactic_net", goal_net)
 
     # Adding 3 dense layers with dropout like in deephol
     # with tf.variable_scope("loss"):
     if is_training:
-        goal_net = tf.nn.dropout(goal_net, rate=(1 - 0.7))
+        goal_net = tf.nn.dropout(goal_net, rate=tactic_classifier_dropout)
     goal_net = tf.layers.dense(
         goal_net, hidden_size, activation=tf.nn.relu, name="tac_dense1"
     )
 
     if is_training:
-        goal_net = tf.nn.dropout(goal_net, rate=(1 - 0.7))
+        goal_net = tf.nn.dropout(goal_net, rate=tactic_classifier_dropout)
     goal_net = tf.layers.dense(
         goal_net, hidden_size, activation=tf.nn.relu, name="tac_dense2"
     )
 
     if is_training:
-        goal_net = tf.nn.dropout(goal_net, rate=(1 - 0.7))
+        goal_net = tf.nn.dropout(goal_net, rate=tactic_classifier_dropout)
     tac_logits = tf.layers.dense(
         goal_net, num_tac_labels, activation=None, name="tac_dense3"
     )
@@ -273,6 +273,7 @@ def create_model(
     is_real_example,
     use_one_hot_embeddings,
     hidden_size,
+    tactic_classifier_dropout,
 ):
     with tf.variable_scope("encoder"):
         with tf.variable_scope("dilated_cnn_pairwise_encoder"):
@@ -309,7 +310,7 @@ def create_model(
 
     with tf.variable_scope("classifier"):
         (tac_loss, tac_logits, tac_probabilities,) = tactic_classifier(
-            goal_net, is_training, tac_ids, num_tac_labels, is_real_example, hidden_size
+            goal_net, is_training, tac_ids, num_tac_labels, is_real_example, hidden_size, tactic_classifier_dropout
         )
 
     with tf.variable_scope("pairwise_scorer"):
@@ -421,6 +422,7 @@ def model_fn_builder(
     max_seq_length,
     do_export,
     vocab_file,
+    tactic_classifier_dropout,
 ):
     def model_fn(features, labels, mode, params):
 
@@ -469,6 +471,7 @@ def model_fn_builder(
             is_negative_labels=is_negative,
             use_one_hot_embeddings=use_one_hot_embeddings,
             hidden_size=bert_config.hidden_size,
+            tactic_classifier_dropout=tactic_classifier_dropout,
         )
 
         tvars = tf.trainable_variables()
@@ -686,6 +689,8 @@ def main(_):
 
     input_data_dir = configuration["fine-tuning"]["data-generation"]["output_data_dir"]
 
+    tactic_classifier_dropout = configuration["fine-tuning"]["tactic_classifier_dropout"]
+
     if FLAGS.do_export:
         init_checkpoint = tf.train.latest_checkpoint(
             configuration["fine-tuning"]["model_dir"]
@@ -782,6 +787,7 @@ def main(_):
         max_seq_length=max_seq_length,
         do_export=FLAGS.do_export,
         vocab_file=vocab_file,
+        tactic_classifier_dropout=tactic_classifier_dropout,
     )
 
     estimator = tf.contrib.tpu.TPUEstimator(
