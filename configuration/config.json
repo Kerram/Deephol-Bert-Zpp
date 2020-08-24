@@ -46,7 +46,7 @@
         "export_dir": "gs://zpp-bucket-1920/tpu-fine-tune/exported/last_tests/test1",
 
         "warmup_proportion": 0.1,
-        "num_train_epochs": 3.0,
+        "num_train_epochs": 5.0,
 
         "train_batch_size": 32,
         "eval_batch_size": 8,
